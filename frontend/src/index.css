@@ -1,0 +1,22 @@
+@import "tailwindcss";
+
+/* Define custom theme variables if needed */
+@theme {
+  /* You can add custom utilities here if you want but we will use CSS variables below */
+}
+
+:root {
+  --bg-primary: #b8afb5;
+  --text-primary: #000000;
+}
+
+html.dark {
+  --bg-primary: #313b48;
+  --text-primary: #ffffff;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  /* The transition classes can be applied here for smooth theme switching */
+}
