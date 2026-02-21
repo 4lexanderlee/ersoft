@@ -80,7 +80,7 @@ const Principal = () => {
       {/* Quick Access Buttons */}
       <div className="flex gap-3 flex-wrap">
         <QuickBtn label="Calendario" onClick={() => navigate('/calendario')} theme={theme} />
-        <QuickBtn label="Venta" onClick={() => navigate('/ventas')} theme={theme} />
+        <QuickBtn label="Venta" onClick={() => navigate('/ventas', { state: { preloadedClient: currentClient } })} theme={theme} />
         <QuickBtn label="Tickets / Boletas Facturas" onClick={() => navigate('/tbf')} theme={theme} />
         <QuickBtn label="Herramientas" onClick={() => navigate('/herramientas')} theme={theme} />
       </div>

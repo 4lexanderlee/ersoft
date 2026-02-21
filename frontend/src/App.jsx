@@ -13,6 +13,7 @@ import Inventario from './pages/Inventario';
 import Lotes from './pages/Lotes';
 import Ventas from './pages/Ventas';
 import TBF from './pages/TBF';
+import Graficos from './pages/Graficos';
 import Placeholder from './pages/Placeholder';
 
 // Protects routes from unauthenticated access
@@ -44,7 +45,7 @@ function AppRoutes() {
         <Route path="principal" element={<Principal />} />
         <Route path="perfil" element={<Perfil />} />
         <Route path="empresa" element={<Empresa />} />
-        <Route path="graficos" element={<Placeholder title="Gráficos" />} />
+        <Route path="graficos" element={<Graficos />} />
         <Route path="ventas" element={<Ventas />} />
         <Route path="tbf" element={<TBF />} />
         <Route path="inventario" element={<Inventario />} />

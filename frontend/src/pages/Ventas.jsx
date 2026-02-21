@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useInventario } from '../context/InventarioContext';
 import { useEmpresa } from '../context/EmpresaContext';
@@ -291,7 +291,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                           Cant. {qty} &nbsp; Total. S/. {(qty * parseFloat(item.precio || 0)).toFixed(2)}
                         </p>
                       </div>
-                      <button onClick={() => removeFromCart(item.id)} className="ml-3 text-red-400 hover:text-red-500 transition-colors flex-shrink-0">
+                      <button onClick={() => removeFromCart(item.id)} className="ml-3 text-red-400 hover:text-red-500 transition-colors shrink-0">
                         <FaTrash size={13} />
                       </button>
                     </div>
@@ -342,6 +342,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
 ───────────────────────────────────────────────────────────────── */
 const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
+  const location = useLocation();
   const [docType, setDocType] = useState('DNI');
   const [docNumber, setDocNumber] = useState('');
   const [client, setClient] = useState(null);
@@ -351,6 +352,25 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const [discountCode, setDiscountCode] = useState('');
   const [discount, setDiscount] = useState(0);
   const [discountMsg, setDiscountMsg] = useState('');
+  const [addClientMsg, setAddClientMsg] = useState('');
+
+  // Pre-load client passed from Principal (Venta button)
+  useEffect(() => {
+    const preloaded = location.state?.preloadedClient;
+    if (preloaded) {
+      setClient(preloaded);
+      setDocType(preloaded.docType || 'DNI');
+      setDocNumber(preloaded.docNumber || '');
+      setClientForm({
+        nombre: preloaded.name || '',
+        apellidos: preloaded.surname || '',
+        documento: preloaded.docNumber || '',
+        telefono: preloaded.telefono || '',
+        correo: preloaded.correo || '',
+      });
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const subtotal = cart.reduce((s, { item, qty }) => s + qty * parseFloat(item.precio || 0), 0);
   const discountAmt = subtotal * discount;
@@ -387,16 +407,34 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleSearch(); };
 
   const handleAddClient = () => {
-    if (!clientForm.nombre || !clientForm.apellidos) return;
+    if (!clientForm.nombre.trim() || !clientForm.apellidos.trim()) {
+      setAddClientMsg('⚠ Nombres y Apellidos son obligatorios.');
+      setTimeout(() => setAddClientMsg(''), 3000);
+      return;
+    }
+    // Use search-bar docNumber first; fall back to the manually typed documento
+    const effectiveDocNumber = docNumber.trim() || clientForm.documento.trim();
     const newClient = {
-      id: Date.now(), docType, docNumber,
-      name: clientForm.nombre, surname: clientForm.apellidos,
-      telefono: clientForm.telefono, correo: clientForm.correo,
+      id: Date.now(),
+      docType,
+      docNumber: effectiveDocNumber,
+      name: clientForm.nombre,
+      surname: clientForm.apellidos,
+      telefono: clientForm.telefono,
+      correo: clientForm.correo,
     };
     const saved = JSON.parse(localStorage.getItem('ersoft_clients') || '[]');
-    localStorage.setItem('ersoft_clients', JSON.stringify([...saved, newClient]));
+    // Avoid duplicate: only insert if no client with same docType+docNumber exists
+    const isDuplicate = effectiveDocNumber && saved.some(
+      c => c.docType === docType && c.docNumber === effectiveDocNumber
+    );
+    if (!isDuplicate) {
+      localStorage.setItem('ersoft_clients', JSON.stringify([...saved, newClient]));
+    }
     setClient(newClient);
     setNotFound(false);
+    setAddClientMsg('✓ Cliente guardado y seleccionado');
+    setTimeout(() => setAddClientMsg(''), 3000);
   };
 
   const handleApplyDiscount = () => {
@@ -494,20 +532,35 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
             </div>
           </div>
 
-          {/* AGREGAR CLIENTE — shown whenever client not yet selected & name typed */}
-          {canAddClient && (
-            <button onClick={handleAddClient}
-              className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full text-sm tracking-wider">
+          {/* AGREGAR CLIENTE — always visible; disabled when client is already selected */}
+          <div className="space-y-2">
+            <button
+              onClick={handleAddClient}
+              disabled={!!client}
+              className={`w-full py-3 font-bold text-sm tracking-wider rounded-full transition-all
+                ${client
+                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed opacity-50'
+                  : 'bg-[#1a1a1a] hover:bg-gray-800 text-white active:scale-95'}`}
+            >
               AGREGAR CLIENTE
             </button>
-          )}
-          {client && (
-            <div className="flex items-center justify-between">
-              <span className="text-green-400 text-sm font-semibold">✓ Cliente seleccionado</span>
-              <button onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setNotFound(false); }}
-                className="text-xs text-red-400 hover:text-red-300">Cambiar</button>
-            </div>
-          )}
+            {addClientMsg && (
+              <p className={`text-xs text-center font-semibold ${
+                addClientMsg.startsWith('✓') ? 'text-green-400' : 'text-yellow-400'
+              }`}>{addClientMsg}</p>
+            )}
+            {client && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-green-400 text-sm font-semibold">✓ Cliente seleccionado</span>
+                <button
+                  onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setNotFound(false); setAddClientMsg(''); }}
+                  className="text-xs text-red-400 hover:text-red-300 underline"
+                >
+                  Cambiar cliente
+                </button>
+              </div>
+            )}
+          </div>
 
           {/* Back */}
           <button onClick={onBack} className={`text-sm ${theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'} underline`}>
