@@ -2,6 +2,7 @@ import React from 'react';
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Header from './Header';
+import AppFooter from '../ui/AppFooter';
 import { useTheme } from '../../context/ThemeContext';
 
 const MainLayout = () => {
@@ -20,9 +21,12 @@ const MainLayout = () => {
         {/* Header */}
         <Header />
 
-        {/* Page content */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto p-6">
-          <Outlet />
+        {/* Page content — footer is the last element so it only shows on scroll */}
+        <main className="flex-1 overflow-x-hidden overflow-y-auto flex flex-col">
+          <div className="flex-1 p-6 flex flex-col">
+            <Outlet />
+          </div>
+          <AppFooter />
         </main>
       </div>
     </div>

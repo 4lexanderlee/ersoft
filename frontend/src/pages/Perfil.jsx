@@ -2,17 +2,14 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useDS } from '../hooks/useDS';
+import PageHeader from '../components/ui/PageHeader';
+import Btn from '../components/ui/Btn';
+import Badge from '../components/ui/Badge';
+
 import {
-  FaArrowLeft,
-  FaUserCircle,
-  FaEnvelope,
-  FaPhone,
-  FaShieldAlt,
-  FaMars,
-  FaVenus,
-  FaPencilAlt,
-  FaCheck,
-  FaTimes,
+  FaUserCircle, FaEnvelope, FaPhone, FaShieldAlt,
+  FaMars, FaVenus, FaPencilAlt, FaCheck, FaTimes,
 } from 'react-icons/fa';
 
 // The master user's "full" profile data (default/fallback)
@@ -44,24 +41,20 @@ const Perfil = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
   const navigate = useNavigate();
+  const ds = useDS();
 
   const [profile, setProfile] = useState(loadProfile);
   const [editing, setEditing] = useState(false);
   const [formData, setFormData] = useState({ ...profile });
   const [saveMsg, setSaveMsg] = useState('');
 
-  const pageBg   = theme === 'dark' ? 'bg-[#313b48]'                          : 'bg-[#d6d0d4]';
-  const cardBg   = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-300 text-gray-900';
-  const headerBg = theme === 'dark' ? 'bg-gray-800 border-gray-700'            : 'bg-[#e8e3e8] border-gray-200';
-  const labelColor = theme === 'dark' ? 'text-gray-400' : 'text-gray-500';
-  const valueColor = theme === 'dark' ? 'text-gray-100' : 'text-gray-900';
-  const avatarBg   = theme === 'dark' ? 'bg-gray-700 border-gray-600'          : 'bg-gray-100 border-gray-300';
-  const badgeBg    = theme === 'dark'
-    ? 'bg-yellow-500/20 text-yellow-400 border border-yellow-500/30'
-    : 'bg-yellow-50 text-yellow-700 border border-yellow-200';
-  const inputCls = theme === 'dark'
-    ? 'bg-gray-700 border-gray-600 text-white placeholder-gray-400 focus:border-yellow-400'
-    : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400 focus:border-yellow-500';
+  // Derived token aliases for readability inside this page
+  const avatarBg   = ds.isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300';
+  const inputCls   = ds.inputDarkFilled;
+  const cardBg     = ds.cardBg;
+  const labelColor = ds.muted;
+  const valueColor = ds.text;
+  const badgeBg    = ds.isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700';
 
   const startEdit = () => {
     setFormData({ ...profile });
@@ -91,23 +84,9 @@ const Perfil = () => {
 
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
+    <div className={`flex flex-col h-full -m-6 ${ds.pageBg}`}>
       {/* ── Header bar ── */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button
-          onClick={() => navigate('/principal')}
-          className={`flex items-center gap-2 font-bold text-lg transition-colors hover:opacity-70 ${valueColor}`}
-        >
-          <FaArrowLeft />
-          Volver al menú
-        </button>
-        <div className="flex items-center gap-4">
-          <span className={`font-medium ${valueColor}`}>{user?.role || 'Master'}</span>
-          <div className={`flex items-center gap-1 px-3 py-1 rounded-full border text-sm ${theme === 'dark' ? 'border-gray-600 text-gray-300' : 'border-gray-400 text-gray-600'}`}>
-            <span>🌙</span>
-          </div>
-        </div>
-      </div>
+      <PageHeader onBack={() => navigate('/principal')} />
 
       {/* ── Content ── */}
       <div className="flex-1 flex flex-col gap-4 px-10 py-6 max-w-3xl mx-auto w-full">
@@ -297,10 +276,7 @@ const Perfil = () => {
 
       </div>
 
-      {/* ── Footer ── */}
-      <div className="py-2 px-4 text-center text-xs text-gray-400 bg-black">
-        ®Todos los derechos reservados. ERSOFT
-      </div>
+
     </div>
   );
 };

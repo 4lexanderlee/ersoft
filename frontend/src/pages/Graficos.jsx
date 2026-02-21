@@ -480,10 +480,6 @@ const Graficos = () => {
 
       </div>
 
-      {/* ── Footer ── */}
-      <div className="py-2 px-4 text-center text-xs text-gray-400 bg-black rounded-lg">
-        ®Todos los derechos reservados. ERSOFT
-      </div>
     </div>
   );
 };

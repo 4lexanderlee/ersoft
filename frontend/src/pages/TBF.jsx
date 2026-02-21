@@ -3,8 +3,14 @@ import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
-import { FaArrowLeft, FaBan, FaEye, FaFilter } from 'react-icons/fa';
+import { useDS } from '../hooks/useDS';
+import { FaBan, FaEye, FaFilter, FaFileInvoiceDollar } from 'react-icons/fa';
 import { MdCalendarToday } from 'react-icons/md';
+import PageHeader from '../components/ui/PageHeader';
+import Btn from '../components/ui/Btn';
+import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import EmptyState from '../components/ui/EmptyState';
 
 /* ─── helpers ─── */
 const fmtDate = (iso) => {
@@ -77,8 +83,7 @@ const buildTicketHTMLFromRecord = (record) => {
 const buildReporteHTML = (records, empresa) => {
   const rows = records.map(r => `
     <tr class="${r.estado === 'Anulado' ? 'anulado' : ''}">
-      <td>${r.id}</td>
-      <td>${r.tipo}</td>
+      <td>${r.id}</td><td>${r.tipo}</td>
       <td>${r.cliente ? `${r.cliente.nombre} ${r.cliente.apellidos}` : 'Consumidor final'}</td>
       <td>${r.cliente?.documento || '—'}</td>
       <td>${fmtDate(r.fecha)}</td>
@@ -87,8 +92,7 @@ const buildReporteHTML = (records, empresa) => {
     </tr>`).join('');
   const total = records.filter(r => r.estado === 'Activo').reduce((s, r) => s + (r.total||0), 0);
   return `<!DOCTYPE html><html lang="es"><head>
-    <meta charset="UTF-8">
-    <title>Reporte TBF - ${empresa?.razonSocial || 'ERSOFT'}</title>
+    <meta charset="UTF-8"><title>Reporte TBF - ${empresa?.razonSocial || 'ERSOFT'}</title>
     <style>
       body { font-family: sans-serif; font-size: 12px; padding: 20px; }
       h1 { font-size: 18px; margin-bottom: 4px; }
@@ -113,7 +117,7 @@ const buildReporteHTML = (records, empresa) => {
   </body></html>`;
 };
 
-const TIPOS = ['Todos', 'Ticket', 'Boleta', 'Factura', 'Cotizar'];
+const TIPOS   = ['Todos', 'Ticket', 'Boleta', 'Factura', 'Cotizar'];
 const ESTADOS = ['Todos', 'Activo', 'Anulado'];
 
 /* ─── TBF Page ─── */
@@ -122,9 +126,9 @@ const TBF = () => {
   const { theme } = useTheme();
   const { login, user } = useAuth();
   const { updateProducto, productos } = useInventario();
+  const ds = useDS();
 
   const [comprobantes, setComprobantes] = useState([]);
-  // Filters
   const [tipoFilter,   setTipoFilter]   = useState('Todos');
   const [idFilter,     setIdFilter]     = useState('');
   const [docFilter,    setDocFilter]    = useState('');
@@ -132,11 +136,9 @@ const TBF = () => {
   const [fechaHasta,   setFechaHasta]   = useState('');
   const [estadoFilter, setEstadoFilter] = useState('Todos');
   const [applied,      setApplied]      = useState({});
-  // Anular modal
-  const [anulTarget, setAnulTarget] = useState(null); // record id to anull
-  const [anulPwd,    setAnulPwd]    = useState('');
-  const [anulError,  setAnulError]  = useState('');
-  // Type dropdowns
+  const [anulTarget,   setAnulTarget]   = useState(null);
+  const [anulPwd,      setAnulPwd]      = useState('');
+  const [anulError,    setAnulError]    = useState('');
   const [showTipoMenu,   setShowTipoMenu]   = useState(false);
   const [showEstadoMenu, setShowEstadoMenu] = useState(false);
 
@@ -150,25 +152,21 @@ const TBF = () => {
     setComprobantes(updated);
   };
 
-  // Apply filters
   const filtered = comprobantes.filter(c => {
     const f = applied;
-    if (f.tipo && f.tipo !== 'Todos' && c.tipo !== f.tipo) return false;
-    if (f.id   && !c.id.toLowerCase().includes(f.id.toLowerCase())) return false;
-    if (f.doc  && !(c.cliente?.documento || '').includes(f.doc)) return false;
+    if (f.tipo   && f.tipo !== 'Todos'   && c.tipo !== f.tipo) return false;
+    if (f.id     && !c.id.toLowerCase().includes(f.id.toLowerCase())) return false;
+    if (f.doc    && !(c.cliente?.documento || '').includes(f.doc)) return false;
     if (f.estado && f.estado !== 'Todos' && c.estado !== f.estado) return false;
-    if (f.desde && c.fecha < f.desde) return false;
-    if (f.hasta && c.fecha > f.hasta + 'T23:59:59') return false;
+    if (f.desde  && c.fecha < f.desde) return false;
+    if (f.hasta  && c.fecha > f.hasta + 'T23:59:59') return false;
     return true;
   });
 
-  const totalFiltrado = filtered
-    .filter(c => c.estado === 'Activo')
-    .reduce((s, c) => s + (c.total || 0), 0);
+  const totalFiltrado = filtered.filter(c => c.estado === 'Activo').reduce((s, c) => s + (c.total || 0), 0);
 
-  const handleApply = () => {
+  const handleApply = () =>
     setApplied({ tipo: tipoFilter, id: idFilter, doc: docFilter, estado: estadoFilter, desde: fechaDesde, hasta: fechaHasta });
-  };
 
   const handleVer = (record) => {
     const html = buildTicketHTMLFromRecord(record);
@@ -176,18 +174,13 @@ const TBF = () => {
     if (w) { w.document.write(html); w.document.close(); }
   };
 
-  const openAnulModal = (id) => {
-    setAnulTarget(id);
-    setAnulPwd('');
-    setAnulError('');
-  };
+  const openAnulModal = (id) => { setAnulTarget(id); setAnulPwd(''); setAnulError(''); };
 
   const handleAnular = () => {
     const result = login(user?.username || '', anulPwd);
     if (!result?.success) { setAnulError('Contraseña incorrecta'); return; }
     const record = comprobantes.find(c => c.id === anulTarget);
     if (record && record.estado === 'Activo') {
-      // Restore stock for each product item
       record.items.forEach(({ id, qty, _type }) => {
         if (_type === 'Producto') {
           const cur = productos.find(p => p.id === id);
@@ -197,9 +190,7 @@ const TBF = () => {
       const updated = comprobantes.map(c => c.id === anulTarget ? { ...c, estado: 'Anulado' } : c);
       persistComprobantes(updated);
     }
-    setAnulTarget(null);
-    setAnulPwd('');
-    setAnulError('');
+    setAnulTarget(null); setAnulPwd(''); setAnulError('');
   };
 
   const handleReporte = () => {
@@ -209,43 +200,32 @@ const TBF = () => {
     if (w) { w.document.write(html); w.document.close(); }
   };
 
-  // Styles
-  const text    = theme === 'dark' ? 'text-white'    : 'text-gray-900';
-  const subTx   = theme === 'dark' ? 'text-gray-400' : 'text-gray-500';
-  const pageBg  = theme === 'dark' ? 'bg-[#313b48]'  : 'bg-[#d6d0d4]';
-  const headerBg= theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-[#e8e3e8] border-gray-200';
-  const inputCls= theme === 'dark'
-    ? 'bg-transparent border-gray-600 text-white placeholder-gray-500'
-    : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400';
-  const dropBg  = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-800';
-  const cardBg  = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
+  // Dropdown class helpers
+  const dropItemBase = 'w-full text-left px-4 py-2 text-sm transition-colors';
+  const selectCls = `flex items-center gap-2 px-4 py-2.5 border rounded-full text-sm font-medium min-w-[120px] outline-none transition-colors ${ds.inputCls}`;
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
-      {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 ${text}`}>
-          <FaArrowLeft /> Volver al menú
-        </button>
-        <span className={`font-medium ${text}`}>Master</span>
-      </div>
+    <div className={`flex flex-col h-full -m-6 ${ds.pageBg}`}>
 
-      {/* Body */}
-      <div className="flex-1 flex flex-col overflow-hidden px-8 py-5 gap-4">
+      {/* ── Header ── */}
+      <PageHeader onBack={() => navigate('/principal')} />
+
+      {/* ── Body ── */}
+      <div className="flex-1 flex flex-col overflow-y-auto px-6 py-5 gap-4">
 
         {/* Filter Row 1 */}
         <div className="flex items-center gap-3 flex-wrap">
+
           {/* Tipo dropdown */}
           <div className="relative">
-            <button onClick={() => { setShowTipoMenu(v => !v); setShowEstadoMenu(false); }}
-              className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium min-w-[100px] outline-none ${inputCls}`}>
-              {tipoFilter} <span className="text-xs">▼</span>
+            <button onClick={() => { setShowTipoMenu(v => !v); setShowEstadoMenu(false); }} className={selectCls}>
+              {tipoFilter} <span className="text-xs ml-auto">▾</span>
             </button>
             {showTipoMenu && (
-              <div className={`absolute top-full left-0 mt-1 w-36 rounded-2xl border shadow-xl z-30 py-1 ${dropBg}`}>
+              <div className={`absolute top-full left-0 mt-1 w-36 rounded-2xl border shadow-xl z-30 py-1 ${ds.dropBg}`}>
                 {TIPOS.map(t => (
                   <button key={t} onClick={() => { setTipoFilter(t); setShowTipoMenu(false); }}
-                    className={`w-full text-left px-4 py-2 text-sm hover:bg-yellow-500/10 ${tipoFilter === t ? 'font-bold text-yellow-500' : ''}`}>
+                    className={`${dropItemBase} hover:bg-yellow-500/10 ${tipoFilter === t ? 'font-bold text-yellow-500' : ''}`}>
                     {t}
                   </button>
                 ))}
@@ -255,42 +235,40 @@ const TBF = () => {
 
           {/* ID filter */}
           <input value={idFilter} onChange={e => setIdFilter(e.target.value)}
-            placeholder="ID"
-            className={`px-4 py-2 border rounded-full text-sm outline-none w-32 ${inputCls}`} />
+            placeholder="ID comprobante"
+            className={`px-4 py-2.5 border rounded-full text-sm outline-none w-36 transition-colors ${ds.inputCls}`} />
 
           {/* Doc filter */}
           <input value={docFilter} onChange={e => setDocFilter(e.target.value)}
-            placeholder="Ingresa documento"
-            className={`px-4 py-2 border rounded-full text-sm outline-none flex-1 min-w-[140px] ${inputCls}`} />
+            placeholder="Documento cliente"
+            className={`px-4 py-2.5 border rounded-full text-sm outline-none flex-1 min-w-[160px] transition-colors ${ds.inputCls}`} />
 
           {/* Date from */}
-          <div className={`flex items-center gap-1 px-3 py-2 border rounded-full ${inputCls}`}>
+          <div className={`flex items-center gap-1.5 px-3 py-2.5 border rounded-full ${ds.inputCls}`}>
+            <MdCalendarToday size={13} className={ds.iconColor} />
             <input type="date" value={fechaDesde} onChange={e => setFechaDesde(e.target.value)}
               className="bg-transparent outline-none text-sm w-32" />
-            <MdCalendarToday size={14} className="text-gray-400" />
           </div>
 
           {/* Date to */}
-          <div className={`flex items-center gap-1 px-3 py-2 border rounded-full ${inputCls}`}>
+          <div className={`flex items-center gap-1.5 px-3 py-2.5 border rounded-full ${ds.inputCls}`}>
+            <MdCalendarToday size={13} className={ds.iconColor} />
             <input type="date" value={fechaHasta} onChange={e => setFechaHasta(e.target.value)}
               className="bg-transparent outline-none text-sm w-32" />
-            <MdCalendarToday size={14} className="text-gray-400" />
           </div>
         </div>
 
         {/* Filter Row 2 */}
         <div className="flex items-center gap-3">
-          {/* Estado dropdown */}
           <div className="relative">
-            <button onClick={() => { setShowEstadoMenu(v => !v); setShowTipoMenu(false); }}
-              className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium min-w-[100px] outline-none ${inputCls}`}>
-              {estadoFilter} <span className="text-xs">▼</span>
+            <button onClick={() => { setShowEstadoMenu(v => !v); setShowTipoMenu(false); }} className={selectCls}>
+              {estadoFilter} <span className="text-xs ml-auto">▾</span>
             </button>
             {showEstadoMenu && (
-              <div className={`absolute top-full left-0 mt-1 w-36 rounded-2xl border shadow-xl z-30 py-1 ${dropBg}`}>
+              <div className={`absolute top-full left-0 mt-1 w-36 rounded-2xl border shadow-xl z-30 py-1 ${ds.dropBg}`}>
                 {ESTADOS.map(e => (
                   <button key={e} onClick={() => { setEstadoFilter(e); setShowEstadoMenu(false); }}
-                    className={`w-full text-left px-4 py-2 text-sm hover:bg-yellow-500/10 ${estadoFilter === e ? 'font-bold text-yellow-500' : ''}`}>
+                    className={`${dropItemBase} hover:bg-yellow-500/10 ${estadoFilter === e ? 'font-bold text-yellow-500' : ''}`}>
                     {e}
                   </button>
                 ))}
@@ -298,107 +276,97 @@ const TBF = () => {
             )}
           </div>
 
-          <button onClick={handleApply}
-            className="flex items-center gap-2 px-5 py-2 bg-[#1a1a1a] hover:bg-gray-700 text-white text-sm font-bold rounded-full">
-            <FaFilter size={11} /> APLICAR
-          </button>
+          <Btn variant="primary" size="sm" leftIcon={<FaFilter size={10} />} onClick={handleApply}>
+            APLICAR
+          </Btn>
         </div>
 
-        {/* List */}
+        {/* ── List ── */}
         <div className="flex-1 overflow-y-auto space-y-2">
           {filtered.length === 0 ? (
-            <div className="flex items-center justify-center h-48">
-              <p className={`text-sm italic ${subTx}`}>No hay comprobantes que coincidan con los filtros.</p>
-            </div>
+            <EmptyState
+              icon={<FaFileInvoiceDollar />}
+              title="Sin comprobantes"
+              message="No hay comprobantes que coincidan con los filtros seleccionados."
+            />
           ) : filtered.map(record => {
             const anulado = record.estado === 'Anulado';
             const clientName = record.cliente
               ? `${record.cliente.nombre || ''} ${record.cliente.apellidos || ''}`.trim()
               : 'Consumidor final';
+
             return (
-              <div key={record.id}
-                className={`flex items-center gap-4 px-5 py-3 border rounded-2xl transition-all ${cardBg} ${anulado ? 'opacity-50' : ''}`}>
+              <Card key={record.id} padding="none"
+                className={`flex items-center gap-4 px-5 py-3.5 transition-all ${anulado ? 'opacity-50' : ''}`}>
+                {/* Info */}
                 <div className="flex-1 min-w-0">
-                  <p className={`font-bold text-sm ${anulado ? 'line-through' : ''} ${text}`}>
-                    {record.tipo} - {record.id}
-                  </p>
-                  <div className={`flex flex-wrap gap-4 text-xs mt-0.5 ${subTx}`}>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className={`font-bold text-sm ${anulado ? 'line-through' : ''} ${ds.text}`}>
+                      {record.tipo} · {record.id}
+                    </p>
+                    <Badge color={anulado ? 'red' : 'green'} dot>
+                      {record.estado}
+                    </Badge>
+                  </div>
+                  <div className={`flex flex-wrap gap-4 text-xs mt-1 ${ds.muted}`}>
                     <span>{clientName}</span>
                     <span>{record.cliente?.documento || '—'}</span>
-                    <span>Fecha. {fmtDate(record.fecha)}</span>
-                    <span>Monto. S/. {(record.total || 0).toFixed(2)}</span>
-                    {anulado && <span className="text-red-400 font-semibold">ANULADO</span>}
+                    <span>{fmtDate(record.fecha)}</span>
+                    <span className="font-semibold">S/. {(record.total || 0).toFixed(2)}</span>
                   </div>
                 </div>
-                {/* Ver */}
-                <button onClick={() => handleVer(record)}
-                  className={`flex items-center gap-1 text-sm font-semibold hover:text-yellow-500 transition-colors ${text}`}>
-                  <FaEye size={13} /> Ver
-                </button>
-                {/* Anular */}
-                {!anulado && (
-                  <button onClick={() => openAnulModal(record.id)}
-                    title="Anular comprobante"
-                    className="text-red-400 hover:text-red-500 transition-colors">
-                    <FaBan size={18} />
-                  </button>
-                )}
-                {anulado && <FaBan size={18} className="text-gray-500" />}
-              </div>
+
+                {/* Actions */}
+                <Btn variant="ghost" size="sm" leftIcon={<FaEye size={12} />} onClick={() => handleVer(record)}>
+                  Ver
+                </Btn>
+                {!anulado
+                  ? <Btn variant="icon" size="sm" onClick={() => openAnulModal(record.id)} title="Anular"><FaBan size={16} className="text-red-400" /></Btn>
+                  : <FaBan size={16} className={ds.subtle} />
+                }
+              </Card>
             );
           })}
         </div>
       </div>
 
-      {/* Footer */}
-      <div className={`flex items-center justify-between px-8 py-4 border-t bg-black`}>
+      {/* ── Footer ── */}
+      <div className="flex items-center justify-between px-8 py-4 border-t bg-black">
         <span className="text-white font-bold text-sm">
-          MONTO: S/. {totalFiltrado.toFixed(2)}
+          MONTO FILTRADO: S/. {totalFiltrado.toFixed(2)}
         </span>
-        <button onClick={handleReporte}
-          className="px-6 py-2.5 bg-white hover:bg-gray-100 text-black font-bold rounded-full text-sm tracking-wider">
+        <Btn variant="secondary" onClick={handleReporte}
+          className="!border-white !text-white hover:!bg-white/10">
           GENERAR REPORTE
-        </button>
+        </Btn>
       </div>
 
-      {/* ── Anular Confirmation Modal ── */}
+      {/* ── Anular Modal ── */}
       {anulTarget && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
-          <div className={`w-full max-w-sm rounded-2xl shadow-2xl p-6 flex flex-col gap-4 ${
-            theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'
-          }`}>
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4">
             <div className="flex items-center gap-3">
-              <FaBan className="text-red-400" size={20} />
-              <h3 className="font-bold text-base">Anular Comprobante</h3>
+              <FaBan className="text-red-400 shrink-0" size={18} />
+              <h3 className={`font-bold text-base ${ds.text}`}>Anular Comprobante</h3>
             </div>
-            <p className={`text-sm ${subTx}`}>
-              Esta acción anulará el comprobante <strong>{anulTarget}</strong> y restaurará el stock de los productos. Ingresa tu contraseña master para confirmar.
+            <p className={`text-sm ${ds.muted}`}>
+              Anulará el comprobante <strong className={ds.text}>{anulTarget}</strong> y restaurará el stock. Confirma con tu contraseña master.
             </p>
             <input
-              type="password"
-              value={anulPwd}
+              type="password" value={anulPwd} autoFocus
               onChange={e => { setAnulPwd(e.target.value); setAnulError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleAnular()}
               placeholder="Contraseña master"
-              autoFocus
-              className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-400 ${
-                theme === 'dark' ? 'bg-gray-800 border-gray-600 placeholder-gray-500' : 'bg-gray-50 border-gray-300 placeholder-gray-400'
-              }`}
+              className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-400/50 ${ds.inputDarkFilled}`}
             />
             {anulError && <p className="text-red-400 text-xs">{anulError}</p>}
             <div className="flex gap-3">
-              <button onClick={() => { setAnulTarget(null); setAnulPwd(''); setAnulError(''); }}
-                className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm ${
-                  theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 hover:bg-gray-100'
-                }`}>
+              <Btn variant="secondary" fullWidth onClick={() => { setAnulTarget(null); setAnulPwd(''); setAnulError(''); }}>
                 Cancelar
-              </button>
-              <button onClick={handleAnular}
-                className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 text-white font-bold rounded-xl text-sm">
-                ANULAR
-              </button>
+              </Btn>
+              <Btn variant="danger" fullWidth onClick={handleAnular}>ANULAR</Btn>
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </div>

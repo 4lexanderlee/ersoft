@@ -7,6 +7,8 @@ import {
   FaPencilAlt, FaSave, FaTimes, FaBuilding, FaFileInvoiceDollar,
   FaQrcode, FaUpload, FaArrowLeft,
 } from 'react-icons/fa';
+import PageHeader from '../components/ui/PageHeader';
+
 
 /* ---------- Reusable sub-components ---------- */
 
@@ -187,17 +189,12 @@ const Empresa = () => {
   };
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
+    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
 
-      {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 transition-colors ${textPrimary}`}>
-          <FaArrowLeft />
-          Volver al menú
-        </button>
-
-        <div className="flex items-center gap-3">
-          {editing ? (
+      <PageHeader
+        onBack={() => navigate('/principal')}
+        right={
+          editing ? (
             <>
               <button
                 onClick={handleCancelEdit}
@@ -220,9 +217,9 @@ const Empresa = () => {
             >
               <FaPencilAlt /> Editar
             </button>
-          )}
-        </div>
-      </div>
+          )
+        }
+      />
 
       {/* Content */}
       <div className="flex-1 flex flex-col gap-5 px-10 py-6 max-w-4xl mx-auto w-full">
@@ -331,10 +328,7 @@ const Empresa = () => {
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="py-2 px-4 text-center text-xs text-gray-400 bg-black">
-        ®Todos los derechos reservados. ERSOFT
-      </div>
+
 
       {/* Modals */}
       {showConfirm && (

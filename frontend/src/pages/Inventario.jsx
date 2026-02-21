@@ -1,10 +1,15 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
-import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
-import { FaArrowLeft, FaPlus, FaEllipsisV, FaImage } from 'react-icons/fa';
+import { useDS } from '../hooks/useDS';
+import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
+import PageHeader from '../components/ui/PageHeader';
+import Btn from '../components/ui/Btn';
+import Card from '../components/ui/Card';
+
+import EmptyState from '../components/ui/EmptyState';
 
 // Panels
 import ActionMenuPanel from '../components/inventario/ActionMenuPanel';
@@ -16,6 +21,7 @@ import AddCategoriasPanel from '../components/inventario/AddCategoriasPanel';
 const ProductCard = ({ item, onEdit, onDelete, theme }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const ds = useDS();
 
   useEffect(() => {
     const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
@@ -23,21 +29,18 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const cardBg = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900';
-  const menuBg = theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-200';
-
   return (
-    <div className={`rounded-2xl border p-4 flex flex-col gap-2 relative ${cardBg}`}>
+    <Card className="flex flex-col gap-2 relative" padding="sm">
       {/* 3-dot menu */}
-      <div ref={menuRef} className="absolute top-3 right-3">
+      <div ref={menuRef} className="absolute top-2 right-2 z-10">
         <button onClick={() => setMenuOpen(!menuOpen)}
-          className={`p-1.5 rounded-lg hover:bg-black/10 transition-colors ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-          <FaEllipsisV size={14} />
+          className={`p-1.5 rounded-lg hover:bg-black/10 transition-colors ${ds.iconColor}`}>
+          <FaEllipsisV size={13} />
         </button>
         {menuOpen && (
-          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${menuBg}`}>
+          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
             <button onClick={() => { setMenuOpen(false); onEdit(); }}
-              className={`w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-blue-500/10 text-blue-500 transition-colors`}>
+              className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-blue-500/10 text-blue-500 transition-colors">
               ✏️ Editar
             </button>
             <button onClick={() => { setMenuOpen(false); onDelete(); }}
@@ -48,32 +51,25 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
         )}
       </div>
 
-      {/* Name */}
-      <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>
-        {item.nombre}
-      </p>
+      <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${ds.text}`}>{item.nombre}</p>
 
-      {/* Image */}
       <div className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden
-        ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+        ${ds.isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
         {item.imagen
           ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
-          : <FaImage size={36} className={theme === 'dark' ? 'text-gray-600' : 'text-gray-300'} />}
+          : <FaImage size={36} className={ds.subtle} />}
       </div>
 
-      {/* Price & Stock */}
-      <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-        Precio: S/. {parseFloat(item.precio || 0).toFixed(2)}
-      </p>
-      <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-        Stock: {item.stock ?? 'N/A'}
-      </p>
+      <p className={`text-sm text-center ${ds.muted}`}>S/. {parseFloat(item.precio || 0).toFixed(2)}</p>
+      <p className={`text-xs text-center font-semibold ${
+        (item.stock ?? 0) <= 0 ? 'text-red-400' : (item.stock ?? 0) <= 5 ? 'text-amber-400' : 'text-green-400'
+      }`}>Stock: {item.stock ?? 'N/A'}</p>
       {item.categoria && (
-        <span className={`text-xs text-center px-2 py-0.5 rounded-full self-center ${theme === 'dark' ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
+        <span className={`text-xs text-center px-2 py-0.5 rounded-full self-center ${ds.isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
           {item.categoria}
         </span>
       )}
-    </div>
+    </Card>
   );
 };
 
@@ -81,37 +77,35 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
 const ServicioCard = ({ item, onEdit, onDelete, theme }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
+  const ds = useDS();
   useEffect(() => {
     const handler = (e) => { if (menuRef.current && !menuRef.current.contains(e.target)) setMenuOpen(false); };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const cardBg = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-900';
-  const menuBg = theme === 'dark' ? 'bg-gray-700 border-gray-600' : 'bg-white border-gray-200';
-
   return (
-    <div className={`rounded-2xl border p-4 flex flex-col gap-2 relative ${cardBg}`}>
-      <div ref={menuRef} className="absolute top-3 right-3">
-        <button onClick={() => setMenuOpen(!menuOpen)} className={`p-1.5 rounded-lg hover:bg-black/10 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-          <FaEllipsisV size={14} />
+    <Card className="flex flex-col gap-2 relative" padding="sm">
+      <div ref={menuRef} className="absolute top-2 right-2 z-10">
+        <button onClick={() => setMenuOpen(!menuOpen)} className={`p-1.5 rounded-lg hover:bg-black/10 ${ds.iconColor}`}>
+          <FaEllipsisV size={13} />
         </button>
         {menuOpen && (
-          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${menuBg}`}>
+          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
             <button onClick={() => { setMenuOpen(false); onEdit(); }} className="w-full text-left px-4 py-2 text-sm text-blue-500 hover:bg-blue-500/10">✏️ Editar</button>
             <button onClick={() => { setMenuOpen(false); onDelete(); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-500/10">🗑️ Eliminar</button>
           </div>
         )}
       </div>
-      <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>{item.nombre}</p>
+      <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${ds.text}`}>{item.nombre}</p>
       {item.imagen
         ? <img src={item.imagen} alt={item.nombre} className="w-full aspect-square rounded-xl object-contain" />
-        : <div className={`w-full aspect-square rounded-xl flex items-center justify-center ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
-            <FaImage size={36} className={theme === 'dark' ? 'text-gray-600' : 'text-gray-300'} />
+        : <div className={`w-full aspect-square rounded-xl flex items-center justify-center ${ds.isDark ? 'bg-gray-700' : 'bg-gray-100'}`}>
+            <FaImage size={36} className={ds.subtle} />
           </div>}
-      <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>Precio: S/. {parseFloat(item.precio || 0).toFixed(2)}</p>
-      {item.descripcion && <p className={`text-xs text-center line-clamp-2 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>{item.descripcion}</p>}
-    </div>
+      <p className={`text-sm text-center ${ds.muted}`}>S/. {parseFloat(item.precio || 0).toFixed(2)}</p>
+      {item.descripcion && <p className={`text-xs text-center line-clamp-2 ${ds.subtle}`}>{item.descripcion}</p>}
+    </Card>
   );
 };
 
@@ -173,6 +167,7 @@ const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats
 const Inventario = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
+  const ds = useDS();
   const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias } = useInventario();
 
   const [activeTab, setActiveTab] = useState('productos'); // 'productos' | 'servicios'
@@ -186,10 +181,7 @@ const Inventario = () => {
 
   const [noLoteAlert, setNoLoteAlert] = useState(false);
 
-  const pageBg = theme === 'dark' ? 'bg-[#313b48]' : 'bg-[#d6d0d4]';
-  const headerBg = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-[#e8e3e8] border-gray-200';
   const tabBarBg = 'bg-[#1a1a1a]';
-  const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
 
   const handlePlusClick = () => {
     setPanel('menu');
@@ -232,17 +224,10 @@ const Inventario = () => {
   };
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 relative overflow-hidden ${pageBg}`}>
+    <div className={`flex flex-col h-full -m-6 relative overflow-hidden ${ds.pageBg}`}>
 
       {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b z-10 ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 ${text}`}>
-          <FaArrowLeft /> Volver al menú
-        </button>
-        <div className="flex items-center gap-3">
-          <span className={`font-medium ${text}`}>Master</span>
-        </div>
-      </div>
+      <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
@@ -286,11 +271,7 @@ const Inventario = () => {
           <div className="flex-1 overflow-y-auto p-5">
             {activeTab === 'productos' && (
               filteredProductos.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 gap-3">
-                  <p className={`font-medium ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                    No hay productos aún. Presiona <strong>+</strong> para agregar.
-                  </p>
-                </div>
+                <EmptyState icon={<FaBoxOpen />} title="Sin productos" message="No hay productos aún. Presiona + para agregar." />
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {filteredProductos.map(p => (
@@ -303,11 +284,7 @@ const Inventario = () => {
             )}
             {activeTab === 'servicios' && (
               filteredServicios.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 gap-3">
-                  <p className={`font-medium ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                    No hay servicios aún. Presiona <strong>+</strong> para agregar.
-                  </p>
-                </div>
+                <EmptyState icon={<FaBoxOpen />} title="Sin servicios" message="No hay servicios aún. Presiona + para agregar." />
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {filteredServicios.map(s => (
@@ -320,14 +297,13 @@ const Inventario = () => {
             )}
           </div>
 
-          {/* Footer */}
-          <div className="py-2 text-center text-xs text-gray-400 bg-black">®Todos los derechos reservados. ERSOFT</div>
+
         </div>
 
         {/* Right Slide Panel */}
-        <div className={`transition-all duration-300 overflow-hidden relative ${isPanelOpen ? 'w-1/2 border-l border-gray-300' : 'w-0'}`}
+        <div className={`transition-all duration-300 overflow-hidden relative h-full ${isPanelOpen ? 'w-1/2 border-l border-gray-300' : 'w-0'}`}
           style={{ borderColor: theme === 'dark' ? '#374151' : '#d1d5db' }}>
-          {isPanelOpen && panelContent()}
+          {isPanelOpen && <div className="h-full">{panelContent()}</div>}
         </div>
       </div>
 
@@ -343,24 +319,21 @@ const Inventario = () => {
 
       {/* No lote alert */}
       {noLoteAlert && (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
-          <div className={`w-full max-w-sm rounded-2xl p-7 flex flex-col gap-4 text-center shadow-2xl ${theme === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
+        <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
+          <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4 text-center">
             <div className="text-4xl">⚠</div>
-            <h3 className="font-bold text-lg">Sin lote activo</h3>
-            <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-              No puedes agregar productos sin un lote activo. Crea un lote primero desde la sección <strong>Crear Lotes</strong>.
+            <h3 className={`font-bold text-lg ${ds.text}`}>Sin lote activo</h3>
+            <p className={`text-sm ${ds.muted}`}>
+              No puedes agregar productos sin un lote activo. Crea un lote primero desde <strong>Crear Lotes</strong>.
             </p>
             <div className="flex gap-3">
-              <button onClick={() => setNoLoteAlert(false)}
-                className={`flex-1 py-2 rounded-xl border font-semibold text-sm ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
-                Cerrar
-              </button>
-              <button onClick={() => { setNoLoteAlert(false); navigate('/lotes'); }}
-                className="flex-1 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-sm">
+              <Btn variant="secondary" fullWidth onClick={() => setNoLoteAlert(false)}>Cerrar</Btn>
+              <Btn variant="primary" fullWidth onClick={() => { setNoLoteAlert(false); navigate('/lotes'); }}
+                className="bg-yellow-500! text-black! hover:bg-yellow-400!">
                 Ir a Lotes
-              </button>
+              </Btn>
             </div>
-          </div>
+          </Card>
         </div>
       )}
     </div>

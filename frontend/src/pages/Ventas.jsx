@@ -9,6 +9,8 @@ import {
   FaPlus, FaMinus, FaTimes, FaChevronDown, FaChevronUp,
 } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
+import PageHeader from '../components/ui/PageHeader';
+
 
 /* ─────────────────────────────────────────────────────────────────
    HELPERS
@@ -111,14 +113,8 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const dropBg = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-800';
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
-      {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 ${text}`}>
-          <FaArrowLeft /> Volver al menú
-        </button>
-        <span className={`font-medium ${text}`}>Master</span>
-      </div>
+    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+      <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Main */}
       <div className="flex flex-1 overflow-hidden">
@@ -263,8 +259,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
             )}
           </div>
 
-          {/* Footer */}
-          <div className="py-2 text-center text-xs text-gray-400 bg-black">®Todos los derechos reservados. ERSOFT</div>
+
         </div>
 
         {/* Cart Side Panel */}
@@ -454,14 +449,8 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const canAddClient = !client && (clientForm.nombre.trim() || clientForm.apellidos.trim());
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
-      {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 ${text}`}>
-          <FaArrowLeft /> Volver al menú
-        </button>
-        <span className={`font-medium ${text}`}>Master</span>
-      </div>
+    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+      <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
@@ -835,14 +824,8 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   };
 
   return (
-    <div className={`flex flex-col min-h-full -m-6 ${pageBg}`}>
-      {/* Header */}
-      <div className={`flex items-center justify-between px-8 py-4 border-b ${headerBg}`}>
-        <button onClick={() => navigate('/principal')} className={`flex items-center gap-2 font-bold text-lg hover:opacity-70 ${text}`}>
-          <FaArrowLeft /> Volver al menú
-        </button>
-        <span className={`font-medium ${text}`}>Master</span>
-      </div>
+    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+      <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Body */}
       <div className="flex flex-1 overflow-hidden">
@@ -884,8 +867,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="py-2 text-center text-xs text-gray-400 bg-black">®Todos los derechos reservados. ERSOFT</div>
+
 
       {/* ── QR Modal ── */}
       {showQrModal && (
