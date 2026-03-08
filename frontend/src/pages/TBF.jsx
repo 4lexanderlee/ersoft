@@ -33,6 +33,10 @@ const buildTicketHTMLFromRecord = (record) => {
     </tr>`).join('');
   const discountRow = discount ? `<tr><td colspan="3" style="text-align:right">Descuento (${(discount*100).toFixed(0)}%)</td><td style="text-align:right;color:green">-S/. ${(subtotal*discount).toFixed(2)}</td></tr>` : '';
 
+  const logoTag = empresa?.logoPath
+    ? `<div style="text-align:center;margin-bottom:8px"><img src="${empresa.logoPath}" alt="logo" style="max-height:70px;max-width:200px;object-fit:contain" /></div>`
+    : '';
+
   return `<!DOCTYPE html><html lang="es"><head>
     <meta charset="UTF-8">
     <title>${empresa?.razonSocial || 'ERSOFT'} - ${tipo} ${id}</title>
@@ -51,8 +55,9 @@ const buildTicketHTMLFromRecord = (record) => {
     </style>
   </head><body>
     ${record.estado === 'Anulado' ? '<p class="anulado">⚠ COMPROBANTE ANULADO</p>' : ''}
+    ${logoTag}
     <h1>${empresa?.razonSocial || 'ERSOFT'}</h1>
-    <p class="center">RUC: ${empresa?.ruc || '—'}</p>
+    <p class="center">${empresa?.tipoDocumento || 'RUC'}: ${empresa?.ruc || '—'}</p>
     <p class="center">${empresa?.direccion || ''}</p>
     <p class="center">Tel: ${empresa?.telefono || '—'}</p>
     <div class="divider"></div>
@@ -79,6 +84,7 @@ const buildTicketHTMLFromRecord = (record) => {
     <script>window.onload = () => { window.print(); }<\/script>
   </body></html>`;
 };
+
 
 const buildReporteHTML = (records, empresa) => {
   const rows = records.map(r => `

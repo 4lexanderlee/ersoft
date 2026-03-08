@@ -704,6 +704,10 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
   const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'Consumidor final';
   const discount = saleData?.discount ? `<tr><td colspan="3" style="text-align:right">Descuento</td><td style="text-align:right;color:green">-S/. ${(saleData.subtotal * saleData.discount).toFixed(2)}</td></tr>` : '';
 
+  const logoTag = empresa?.logoPath
+    ? `<div style="text-align:center;margin-bottom:8px"><img src="${empresa.logoPath}" alt="logo" style="max-height:70px;max-width:200px;object-fit:contain" /></div>`
+    : '';
+
   return `<!DOCTYPE html><html lang="es"><head>
     <meta charset="UTF-8">
     <title>${empresa?.razonSocial || 'ERSOFT'} - Comprobante</title>
@@ -721,8 +725,9 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
       @media print { .no-print { display:none; } }
     </style>
   </head><body>
+    ${logoTag}
     <h1>${empresa?.razonSocial || 'ERSOFT'}</h1>
-    <p class="center">RUC: ${empresa?.ruc || '—'}</p>
+    <p class="center">${empresa?.tipoDocumento || 'RUC'}: ${empresa?.ruc || '—'}</p>
     <p class="center">${empresa?.direccion || ''}${empresa?.ciudad ? ', ' + empresa.ciudad : ''}</p>
     <p class="center">Tel: ${empresa?.telefono || '—'}</p>
     <div class="divider"></div>
@@ -789,7 +794,15 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       discount: saleData?.discount || 0,
       total: saleData?.total || 0,
       metodoPago: selectedMethod,
-      empresa: empresa ? { razonSocial: empresa.razonSocial, ruc: empresa.ruc, direccion: empresa.direccion, telefono: empresa.telefono, pieFactura: empresa.pieFactura } : null,
+      empresa: empresa ? {
+        razonSocial: empresa.razonSocial,
+        tipoDocumento: empresa.tipoDocumento,
+        ruc: empresa.ruc,
+        direccion: empresa.direccion,
+        telefono: empresa.telefono,
+        pieFactura: empresa.pieFactura,
+        logoPath: empresa.logoPath || null,
+      } : null,
     };
     const prev = JSON.parse(localStorage.getItem('ersoft_comprobantes') || '[]');
     localStorage.setItem('ersoft_comprobantes', JSON.stringify([record, ...prev]));

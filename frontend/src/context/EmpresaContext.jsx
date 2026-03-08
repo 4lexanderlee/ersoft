@@ -8,10 +8,11 @@ const DEFAULT_EMPRESA = {
   // Datos generales
   razonSocial: 'ERSOFT S.A.C.',
   nombreComercial: 'ER-Soft',
-  ruc: '20123456789',
-  tipoEmpresa: 'S.A.C.',
+  tipoDocumento: 'RUC',          // 'DNI' | 'RUS' | 'RUC'
+  ruc: '20123456789',            // número de documento (se mantiene como 'ruc' para compatibilidad)
   giroNegocio: 'Desarrollo de Software y Consultoría Empresarial',
   representanteLegal: 'Alexander Lee Melgarejo',
+  logoPath: null,                // base64 del logo PNG de la empresa
   // Ubicación
   departamento: 'Lima',
   provincia: 'Lima',
@@ -29,7 +30,7 @@ const DEFAULT_EMPRESA = {
   moneda: 'PEN',
   pieFactura: 'Gracias por su preferencia. Para consultas: contacto@ersoft.com',
   cuentaBancaria: '194-1234567890-1-23 (BCP)',
-  qrPath: null, // stores base64 or URL of uploaded QR image
+  qrPath: null,                  // base64 del QR de billetera electrónica
 };
 
 export const EmpresaProvider = ({ children }) => {
