@@ -1,15 +1,14 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useDS } from '../hooks/useDS';
 import PageHeader from '../components/ui/PageHeader';
-import Btn from '../components/ui/Btn';
-import Badge from '../components/ui/Badge';
 
 import {
   FaUserCircle, FaEnvelope, FaPhone, FaShieldAlt,
   FaMars, FaVenus, FaPencilAlt, FaCheck, FaTimes,
+  FaKey, FaUser, FaLock, FaEye, FaEyeSlash,
 } from 'react-icons/fa';
 
 // The master user's "full" profile data (default/fallback)
@@ -37,18 +36,112 @@ const loadProfile = () => {
   return MASTER_PROFILE;
 };
 
+/* ─── Master-password confirmation modal ─── */
+const MasterPasswordModal = ({ onConfirm, onCancel, theme, ds }) => {
+  const [pwd, setPwd] = useState('');
+  const [show, setShow] = useState(false);
+  const [err, setErr] = useState('');
+
+  const handleConfirm = () => {
+    if (onConfirm(pwd)) {
+      setErr('');
+    } else {
+      setErr('Contraseña incorrecta');
+      setPwd('');
+    }
+  };
+
+  const inputCls = ds.inputDarkFilled;
+  const cardBg   = ds.cardBg;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+      <div className={`rounded-2xl border p-7 w-full max-w-sm shadow-2xl flex flex-col gap-4 ${cardBg}`}>
+        <div className="flex items-center gap-3">
+          <FaLock className={ds.muted} size={18} />
+          <h2 className={`text-base font-extrabold uppercase tracking-wider ${ds.text}`}>
+            Confirmar identidad
+          </h2>
+        </div>
+        <p className={`text-sm ${ds.muted}`}>
+          Ingresa la contraseña master para editar los datos de acceso.
+        </p>
+
+        {/* Password input */}
+        <div className="relative">
+          <input
+            autoFocus
+            type={show ? 'text' : 'password'}
+            placeholder="Contraseña master"
+            value={pwd}
+            onChange={e => { setPwd(e.target.value); setErr(''); }}
+            onKeyDown={e => e.key === 'Enter' && handleConfirm()}
+            className={`w-full px-4 py-2.5 rounded-lg border text-sm outline-none transition-colors pr-10 ${inputCls}`}
+          />
+          <button
+            type="button"
+            onClick={() => setShow(s => !s)}
+            className={`absolute right-3 top-1/2 -translate-y-1/2 ${ds.muted} hover:text-white transition-colors`}
+          >
+            {show ? <FaEyeSlash size={14} /> : <FaEye size={14} />}
+          </button>
+        </div>
+
+        {err && <p className="text-red-400 text-xs font-semibold">{err}</p>}
+
+        <div className="flex gap-3 justify-end mt-1">
+          <button
+            onClick={onCancel}
+            className={`px-4 py-2 rounded-lg text-sm font-bold border transition-colors ${
+              theme === 'dark'
+                ? 'border-gray-600 text-gray-400 hover:text-gray-200 hover:border-gray-400'
+                : 'border-gray-300 text-gray-500 hover:text-gray-700'
+            }`}
+          >
+            Cancelar
+          </button>
+          <button
+            onClick={handleConfirm}
+            className="px-4 py-2 rounded-lg text-sm font-bold bg-yellow-500 text-black hover:bg-yellow-400 transition-colors"
+          >
+            Confirmar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Mask password: show first char + asterisks ─── */
+const maskPassword = (pw = '') => {
+  if (!pw) return '';
+  return pw[0] + '*'.repeat(Math.max(pw.length - 1, 7));
+};
+
 const Perfil = () => {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const { user, verifyMasterPassword, updateCredentials, getCredentials } = useAuth();
   const navigate = useNavigate();
   const ds = useDS();
 
-  const [profile, setProfile] = useState(loadProfile);
-  const [editing, setEditing] = useState(false);
+  const [profile, setProfile]   = useState(loadProfile);
+  const [editing, setEditing]   = useState(false);
   const [formData, setFormData] = useState({ ...profile });
-  const [saveMsg, setSaveMsg] = useState('');
+  const [saveMsg, setSaveMsg]   = useState('');
 
-  // Derived token aliases for readability inside this page
+  // Credentials state
+  const [creds, setCreds]             = useState(getCredentials);
+  const [showModal, setShowModal]     = useState(false);
+  const [newUsername, setNewUsername] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [showNewPwd, setShowNewPwd]   = useState(false);
+
+  // Re-read creds whenever editing ends (in case they changed)
+  useEffect(() => {
+    if (!editing) setCreds(getCredentials());
+  }, [editing]);
+
+  // Derived token aliases
   const avatarBg   = ds.isDark ? 'bg-gray-700 border-gray-600' : 'bg-gray-100 border-gray-300';
   const inputCls   = ds.inputDarkFilled;
   const cardBg     = ds.cardBg;
@@ -56,10 +149,22 @@ const Perfil = () => {
   const valueColor = ds.text;
   const badgeBg    = ds.isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700';
 
+  // ── Edit pencil clicked → open master-password modal ──
   const startEdit = () => {
-    setFormData({ ...profile });
-    setSaveMsg('');
-    setEditing(true);
+    setShowModal(true);
+  };
+
+  const handleModalConfirm = (pwd) => {
+    if (verifyMasterPassword(pwd)) {
+      setShowModal(false);
+      setFormData({ ...profile });
+      setNewUsername(creds.username);
+      setNewPassword(creds.password);
+      setSaveMsg('');
+      setEditing(true);
+      return true;
+    }
+    return false;
   };
 
   const cancelEdit = () => {
@@ -68,13 +173,22 @@ const Perfil = () => {
   };
 
   const saveEdit = () => {
+    // Save profile fields
     const updated = { ...profile, ...formData };
     setProfile(updated);
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      // Trigger storage event so Header re-reads the greeting immediately
       window.dispatchEvent(new Event('storage'));
     } catch (_) {}
+
+    // Save credentials if they changed
+    const trimUser = newUsername.trim();
+    const trimPwd  = newPassword.trim();
+    if (trimUser && trimPwd) {
+      updateCredentials(trimUser, trimPwd);
+      setCreds({ username: trimUser, password: trimPwd });
+    }
+
     setEditing(false);
     setSaveMsg('✓ Guardado correctamente');
     setTimeout(() => setSaveMsg(''), 3000);
@@ -82,9 +196,18 @@ const Perfil = () => {
 
   const field = (k, v) => setFormData(p => ({ ...p, [k]: v }));
 
-
   return (
     <div className={`flex flex-col h-full -m-6 ${ds.pageBg}`}>
+      {/* Master-password modal */}
+      {showModal && (
+        <MasterPasswordModal
+          onConfirm={handleModalConfirm}
+          onCancel={() => setShowModal(false)}
+          theme={theme}
+          ds={ds}
+        />
+      )}
+
       {/* ── Header bar ── */}
       <PageHeader onBack={() => navigate('/principal')} />
 
@@ -274,9 +397,74 @@ const Perfil = () => {
           </ul>
         </div>
 
+        {/* ── Card 4: Access credentials ── */}
+        <div className={`rounded-2xl border p-6 ${cardBg}`}>
+          <div className="flex items-center gap-2 mb-4">
+            <FaKey className={labelColor} />
+            <span className={`text-sm font-bold uppercase tracking-widest ${labelColor}`}>Datos de acceso</span>
+          </div>
+
+          <div className="grid grid-cols-2 gap-y-4 gap-x-8">
+            {/* Usuario */}
+            <div>
+              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Usuario</span>
+              {editing ? (
+                <div className="flex items-center gap-2 mt-1">
+                  <FaUser size={13} className={labelColor} />
+                  <input
+                    type="text"
+                    value={newUsername}
+                    onChange={e => setNewUsername(e.target.value)}
+                    placeholder="Nombre de usuario"
+                    className={`px-3 py-1.5 rounded-lg border text-sm outline-none transition-colors flex-1 ${inputCls}`}
+                  />
+                </div>
+              ) : (
+                <p className={`font-bold flex items-center gap-2 mt-0.5 ${valueColor}`}>
+                  <FaUser size={13} className={labelColor} />
+                  {creds.username}
+                </p>
+              )}
+            </div>
+
+            {/* Contraseña */}
+            <div>
+              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Contraseña</span>
+              {editing ? (
+                <div className="relative mt-1">
+                  <input
+                    type={showNewPwd ? 'text' : 'password'}
+                    value={newPassword}
+                    onChange={e => setNewPassword(e.target.value)}
+                    placeholder="Nueva contraseña"
+                    className={`px-3 py-1.5 rounded-lg border text-sm outline-none transition-colors w-full pr-8 ${inputCls}`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowNewPwd(s => !s)}
+                    className={`absolute right-2 top-1/2 -translate-y-1/2 text-xs ${labelColor} hover:text-white transition-colors`}
+                  >
+                    {showNewPwd ? <FaEyeSlash size={13} /> : <FaEye size={13} />}
+                  </button>
+                </div>
+              ) : (
+                <p className={`font-bold font-mono flex items-center gap-2 mt-0.5 ${valueColor}`}>
+                  <FaLock size={13} className={labelColor} />
+                  {maskPassword(creds.password)}
+                </p>
+              )}
+            </div>
+          </div>
+
+          {/* Hint */}
+          {!editing && (
+            <p className={`text-xs mt-4 ${labelColor}`}>
+              Usa el lápiz de editar para cambiar el usuario o la contraseña.
+            </p>
+          )}
+        </div>
+
       </div>
-
-
     </div>
   );
 };
