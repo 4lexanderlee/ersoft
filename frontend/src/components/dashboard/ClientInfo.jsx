@@ -33,15 +33,15 @@ const ClientInfo = ({ client }) => {
         </div>
         <div>
           <p className={`text-sm mb-1 ${textSecondaryClass}`}>Correo Electrónico</p>
-          <p className={`font-medium ${textClass}`}>{client?.email || 'No especificado'}</p>
+          <p className={`font-medium ${textClass}`}>{client?.correo || 'No especificado'}</p>
         </div>
         <div>
           <p className={`text-sm mb-1 ${textSecondaryClass}`}>Teléfono</p>
-          <p className={`font-medium ${textClass}`}>{client?.phone || 'No especificado'}</p>
+          <p className={`font-medium ${textClass}`}>{client?.telefono || 'No especificado'}</p>
         </div>
         <div className="md:col-span-2 lg:col-span-2">
           <p className={`text-sm mb-1 ${textSecondaryClass}`}>Dirección</p>
-          <p className={`font-medium ${textClass}`}>{client?.address || 'No especificado'}</p>
+          <p className={`font-medium ${textClass}`}>{client?.direccionFiscal || 'No especificado'}</p>
         </div>
       </div>
     </div>

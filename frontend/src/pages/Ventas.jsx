@@ -10,6 +10,10 @@ import {
 } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
+import {
+  validateDocNumber, validatePhone, validateEmail,
+  validateName, sanitizeName, sanitizePhone, sanitizeDocNumber,
+} from '../utils/clientValidations';
 
 
 /* ─────────────────────────────────────────────────────────────────
@@ -342,6 +346,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const [docNumber, setDocNumber] = useState('');
   const [client, setClient] = useState(null);
   const [clientForm, setClientForm] = useState({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' });
+  const [clientErrors, setClientErrors] = useState({});
   const [notFound, setNotFound] = useState(false);
   const [saleType, setSaleType] = useState('Ticket');
   const [discountCode, setDiscountCode] = useState('');
@@ -402,21 +407,37 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleSearch(); };
 
   const handleAddClient = () => {
-    if (!clientForm.nombre.trim() || !clientForm.apellidos.trim()) {
-      setAddClientMsg('⚠ Nombres y Apellidos son obligatorios.');
-      setTimeout(() => setAddClientMsg(''), 3000);
+    const effectiveDocNumber = docNumber.trim() || clientForm.documento.trim();
+    const errs = {};
+
+    const eNombre    = validateName(clientForm.nombre, 'Nombres');
+    const eApellidos = validateName(clientForm.apellidos, 'Apellidos');
+    const eDoc       = validateDocNumber(docType, effectiveDocNumber);
+    const eTel       = validatePhone(clientForm.telefono);
+    const eEmail     = validateEmail(clientForm.correo);
+
+    if (eNombre)    errs.nombre    = eNombre;
+    if (eApellidos) errs.apellidos = eApellidos;
+    if (eDoc)       errs.documento = eDoc;
+    if (eTel)       errs.telefono  = eTel;
+    if (eEmail)     errs.correo    = eEmail;
+
+    if (Object.keys(errs).length > 0) {
+      setClientErrors(errs);
+      setAddClientMsg('⚠ Corrige los errores antes de continuar.');
+      setTimeout(() => setAddClientMsg(''), 4000);
       return;
     }
-    // Use search-bar docNumber first; fall back to the manually typed documento
-    const effectiveDocNumber = docNumber.trim() || clientForm.documento.trim();
+    setClientErrors({});
+
     const newClient = {
       id: Date.now(),
       docType,
       docNumber: effectiveDocNumber,
-      name: clientForm.nombre,
-      surname: clientForm.apellidos,
-      telefono: clientForm.telefono,
-      correo: clientForm.correo,
+      name: clientForm.nombre.trim(),
+      surname: clientForm.apellidos.trim(),
+      telefono: clientForm.telefono.trim(),
+      correo: clientForm.correo.trim(),
     };
     const saved = JSON.parse(localStorage.getItem('ersoft_clients') || '[]');
     // Avoid duplicate: only insert if no client with same docType+docNumber exists
@@ -458,13 +479,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
         <div className="flex-1 overflow-y-auto px-8 py-5 space-y-4">
           {/* Doc search bar */}
           <div className="flex items-center gap-3">
-            <select value={docType} onChange={e => { setDocType(e.target.value); setDocNumber(''); setClient(null); setNotFound(false); }}
+            <select value={docType} onChange={e => { setDocType(e.target.value); setDocNumber(''); setClient(null); setNotFound(false); setClientErrors({}); }}
               className={`px-3 py-2 border rounded-full text-sm outline-none ${theme === 'dark' ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}>
               {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <input
               value={docNumber}
-              onChange={e => setDocNumber(e.target.value.replace(/\D/g, '').slice(0, DOC_MAX[docType]))}
+              onChange={e => setDocNumber(sanitizeDocNumber(docType, e.target.value))}
               onKeyDown={handleKeyDown}
               placeholder={`Digite aquí la documentación del cliente (${docPlaceholder[docType]})`}
               className={`flex-1 px-4 py-2 border rounded-full text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${theme === 'dark' ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`}
@@ -488,36 +509,83 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
           {/* Client form fields */}
           <div className={`rounded-2xl border p-5 space-y-3 ${sectionBg}`}>
-            {[
-              { label: 'Nombres', key: 'nombre', required: true, placeholder: 'ej. Rodrigo Alberto', half: false },
-              { label: 'Apellidos', key: 'apellidos', required: true, placeholder: 'ej. Garcia Peréz', half: false },
-            ].map(f => (
-              <div key={f.key} className="flex items-center gap-2 border-b pb-2 last:border-0">
-                <label className={`text-sm w-24 ${text}`}>{f.label} {f.required && <span className="text-red-500">*</span>}</label>
+            {/* Nombres */}
+            <div className="flex items-start gap-2 border-b pb-2">
+              <label className={`text-sm w-24 pt-1 ${text}`}>Nombres <span className="text-red-500">*</span></label>
+              <div className="flex-1">
                 <input
-                  value={clientForm[f.key]}
-                  onChange={e => setClientForm(p => ({ ...p, [f.key]: e.target.value }))}
-                  placeholder={f.placeholder}
+                  value={clientForm.nombre}
+                  onChange={e => {
+                    setClientForm(p => ({ ...p, nombre: sanitizeName(e.target.value) }));
+                    if (clientErrors.nombre) setClientErrors(p => { const n={...p}; delete n.nombre; return n; });
+                  }}
+                  placeholder="ej. Rodrigo Alberto"
                   disabled={!!client}
-                  className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60`}
+                  className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
+                    ${clientErrors.nombre ? 'border-red-500' : ''}`}
                 />
+                {clientErrors.nombre && <p className="text-red-400 text-[11px] mt-0.5">{clientErrors.nombre}</p>}
               </div>
-            ))}
-            <div className="flex items-center gap-4 border-b pb-2">
-              <label className={`text-sm w-24 ${text}`}>Documento</label>
-              <input value={clientForm.documento} onChange={e => setClientForm(p => ({ ...p, documento: e.target.value }))}
-                placeholder="DNI, CE o RUC" disabled={!!client}
-                className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60`} />
-              <label className={`text-sm w-16 ${text}`}>Teléfono</label>
-              <input value={clientForm.telefono} onChange={e => setClientForm(p => ({ ...p, telefono: e.target.value }))}
-                placeholder="XXX XXX XXX" disabled={!!client}
-                className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60`} />
             </div>
-            <div className="flex items-center gap-2">
-              <label className={`text-sm w-24 ${text}`}>Correo</label>
-              <input value={clientForm.correo} onChange={e => setClientForm(p => ({ ...p, correo: e.target.value }))}
-                placeholder="ej. cliente_correo@ersoft.pe" disabled={!!client}
-                className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60`} />
+            {/* Apellidos */}
+            <div className="flex items-start gap-2 border-b pb-2">
+              <label className={`text-sm w-24 pt-1 ${text}`}>Apellidos <span className="text-red-500">*</span></label>
+              <div className="flex-1">
+                <input
+                  value={clientForm.apellidos}
+                  onChange={e => {
+                    setClientForm(p => ({ ...p, apellidos: sanitizeName(e.target.value) }));
+                    if (clientErrors.apellidos) setClientErrors(p => { const n={...p}; delete n.apellidos; return n; });
+                  }}
+                  placeholder="ej. Garcia Peréz"
+                  disabled={!!client}
+                  className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
+                    ${clientErrors.apellidos ? 'border-red-500' : ''}`}
+                />
+                {clientErrors.apellidos && <p className="text-red-400 text-[11px] mt-0.5">{clientErrors.apellidos}</p>}
+              </div>
+            </div>
+            {/* Documento + Teléfono */}
+            <div className="flex items-start gap-4 border-b pb-2">
+              <label className={`text-sm w-24 pt-1 ${text}`}>Documento <span className="text-red-500">*</span></label>
+              <div className="flex-1">
+                <input value={clientForm.documento}
+                  onChange={e => {
+                    setClientForm(p => ({ ...p, documento: sanitizeDocNumber(docType, e.target.value) }));
+                    if (clientErrors.documento) setClientErrors(p => { const n={...p}; delete n.documento; return n; });
+                  }}
+                  placeholder={docPlaceholder[docType]} disabled={!!client}
+                  className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
+                    ${clientErrors.documento ? 'border-red-500' : ''}`} />
+                {clientErrors.documento && <p className="text-red-400 text-[11px] mt-0.5">{clientErrors.documento}</p>}
+              </div>
+              <label className={`text-sm w-16 pt-1 ${text}`}>Teléfono</label>
+              <div className="flex-1">
+                <input value={clientForm.telefono}
+                  onChange={e => {
+                    setClientForm(p => ({ ...p, telefono: sanitizePhone(e.target.value) }));
+                    if (clientErrors.telefono) setClientErrors(p => { const n={...p}; delete n.telefono; return n; });
+                  }}
+                  placeholder="9 dígitos" disabled={!!client}
+                  className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
+                    ${clientErrors.telefono ? 'border-red-500' : ''}`} />
+                {clientErrors.telefono && <p className="text-red-400 text-[11px] mt-0.5">{clientErrors.telefono}</p>}
+              </div>
+            </div>
+            {/* Correo */}
+            <div className="flex items-start gap-2">
+              <label className={`text-sm w-24 pt-1 ${text}`}>Correo</label>
+              <div className="flex-1">
+                <input value={clientForm.correo}
+                  onChange={e => {
+                    setClientForm(p => ({ ...p, correo: e.target.value }));
+                    if (clientErrors.correo) setClientErrors(p => { const n={...p}; delete n.correo; return n; });
+                  }}
+                  placeholder="ej. cliente_correo@ersoft.pe" disabled={!!client}
+                  className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
+                    ${clientErrors.correo ? 'border-red-500' : ''}`} />
+                {clientErrors.correo && <p className="text-red-400 text-[11px] mt-0.5">{clientErrors.correo}</p>}
+              </div>
             </div>
           </div>
 
@@ -542,7 +610,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
               <div className="flex items-center justify-between px-1">
                 <span className="text-green-400 text-sm font-semibold">✓ Cliente seleccionado</span>
                 <button
-                  onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setNotFound(false); setAddClientMsg(''); }}
+                  onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setClientErrors({}); setNotFound(false); setAddClientMsg(''); }}
                   className="text-xs text-red-400 hover:text-red-300 underline"
                 >
                   Cambiar cliente
