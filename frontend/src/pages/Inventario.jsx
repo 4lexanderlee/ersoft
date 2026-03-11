@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
 import { useDS } from '../hooks/useDS';
-import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen } from 'react-icons/fa';
+import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen, FaSearch } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
 import Btn from '../components/ui/Btn';
@@ -236,6 +236,7 @@ const Inventario = () => {
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('');
   const [selectedCats, setSelectedCats] = useState([]);
+  const [searchText, setSearchText] = useState('');
 
   const [noLoteAlert, setNoLoteAlert] = useState(false);
 
@@ -259,8 +260,15 @@ const Inventario = () => {
 
   const applyFilters = (items) => {
     let arr = [...items];
+    // Search filter: name or barcode
+    if (searchText.trim()) {
+      const q = searchText.trim().toLowerCase();
+      arr = arr.filter(i =>
+        i.nombre.toLowerCase().includes(q) ||
+        (i.codigoBarras && String(i.codigoBarras).toLowerCase().includes(q))
+      );
+    }
     if (selectedCats.length > 0) {
-      // Match if ANY of item's categories is in selectedCats
       arr = arr.filter(i => {
         const cats = getCats(i);
         return cats.some(c => selectedCats.includes(c));
@@ -307,13 +315,13 @@ const Inventario = () => {
           {/* Tab Bar */}
           <div className={`flex items-center ${tabBarBg}`}>
             <button
-              onClick={() => setActiveTab('productos')}
+              onClick={() => { setActiveTab('productos'); setSearchText(''); }}
               className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors relative
                 ${activeTab === 'productos' ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
               Productos
             </button>
             <button
-              onClick={() => setActiveTab('servicios')}
+              onClick={() => { setActiveTab('servicios'); setSearchText(''); }}
               className={`flex-1 py-3 text-sm font-bold uppercase tracking-wider transition-colors
                 ${activeTab === 'servicios' ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
               Servicios
@@ -335,6 +343,32 @@ const Inventario = () => {
                 />
               )}
             </div>
+          </div>
+
+          {/* Search bar — context-aware per active tab */}
+          <div className={`flex items-center gap-2 px-5 py-3 border-b ${
+            ds.isDark ? 'bg-gray-800/60 border-gray-700' : 'bg-white/60 border-gray-200'
+          }`}>
+            <FaSearch size={13} className={ds.subtle} />
+            <input
+              value={searchText}
+              onChange={e => setSearchText(e.target.value)}
+              placeholder={activeTab === 'productos'
+                ? 'Buscar producto por nombre o código de barras...'
+                : 'Buscar servicio por nombre...'}
+              className={`flex-1 bg-transparent outline-none text-sm ${
+                ds.isDark ? 'text-white placeholder-gray-500' : 'text-gray-900 placeholder-gray-400'
+              }`}
+            />
+            {searchText && (
+              <button
+                onClick={() => setSearchText('')}
+                className={`text-xs px-2 py-0.5 rounded-full transition-colors ${
+                  ds.isDark ? 'text-gray-400 hover:text-white' : 'text-gray-400 hover:text-gray-700'
+                }`}>
+                ✕
+              </button>
+            )}
           </div>
 
           {/* Grid */}

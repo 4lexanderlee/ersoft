@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
 import { useDS } from '../hooks/useDS';
-import { FaBan, FaEye, FaFilter, FaFileInvoiceDollar } from 'react-icons/fa';
+import { FaBan, FaEye, FaFilter, FaFileInvoiceDollar, FaTrash, FaCheckSquare } from 'react-icons/fa';
 import { MdCalendarToday } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
 import Btn from '../components/ui/Btn';
@@ -148,6 +148,13 @@ const TBF = () => {
   const [showTipoMenu,   setShowTipoMenu]   = useState(false);
   const [showEstadoMenu, setShowEstadoMenu] = useState(false);
 
+  // Bulk selection state
+  const [selectMode,    setSelectMode]    = useState(false);
+  const [selectedIds,   setSelectedIds]   = useState([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkPwd,       setBulkPwd]       = useState('');
+  const [bulkPwdError,  setBulkPwdError]  = useState('');
+
   useEffect(() => {
     const saved = JSON.parse(localStorage.getItem('ersoft_comprobantes') || '[]');
     setComprobantes(saved);
@@ -181,6 +188,28 @@ const TBF = () => {
   };
 
   const openAnulModal = (id) => { setAnulTarget(id); setAnulPwd(''); setAnulError(''); };
+
+  // ── Bulk select helpers ──
+  const enterSelectMode = () => {
+    // Pre-select all currently filtered comprobantes (if no filter applied → all)
+    setSelectedIds(filtered.map(c => c.id));
+    setSelectMode(true);
+  };
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds([]); };
+  const toggleSelect = (id) =>
+    setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const selectAll = () => setSelectedIds(filtered.map(c => c.id));
+  const deselectAll = () => setSelectedIds([]);
+
+  const openBulkDeleteModal = () => { setBulkPwd(''); setBulkPwdError(''); setShowBulkModal(true); };
+  const handleBulkDelete = () => {
+    const result = login(user?.username || '', bulkPwd);
+    if (!result?.success) { setBulkPwdError('Contraseña incorrecta'); return; }
+    const updated = comprobantes.filter(c => !selectedIds.includes(c.id));
+    persistComprobantes(updated);
+    setShowBulkModal(false);
+    exitSelectMode();
+  };
 
   const handleAnular = () => {
     const result = login(user?.username || '', anulPwd);
@@ -284,6 +313,28 @@ const TBF = () => {
           <Btn variant="primary" size="sm" leftIcon={<FaFilter size={10} />} onClick={handleApply}>
             APLICAR
           </Btn>
+
+          <div className="ml-auto">
+            {!selectMode ? (
+              <Btn variant="secondary" size="sm" leftIcon={<FaCheckSquare size={12} />} onClick={enterSelectMode}>
+                Seleccionar
+              </Btn>
+            ) : (
+              <div className="flex items-center gap-2">
+                <span className={`text-xs font-semibold ${ds.muted}`}>{selectedIds.length} seleccionado{selectedIds.length !== 1 ? 's' : ''}</span>
+                <Btn variant="secondary" size="sm" onClick={selectAll}>Todo</Btn>
+                <Btn variant="secondary" size="sm" onClick={deselectAll}>Ninguno</Btn>
+                <Btn
+                  variant="danger" size="sm"
+                  leftIcon={<FaTrash size={11} />}
+                  onClick={openBulkDeleteModal}
+                  disabled={selectedIds.length === 0}>
+                  Eliminar
+                </Btn>
+                <Btn variant="secondary" size="sm" onClick={exitSelectMode}>Cancelar</Btn>
+              </div>
+            )}
+          </div>
         </div>
 
         {/* ── List ── */}
@@ -296,13 +347,31 @@ const TBF = () => {
             />
           ) : filtered.map(record => {
             const anulado = record.estado === 'Anulado';
+            const isSelected = selectedIds.includes(record.id);
             const clientName = record.cliente
               ? `${record.cliente.nombre || ''} ${record.cliente.apellidos || ''}`.trim()
               : 'Consumidor final';
 
             return (
               <Card key={record.id} padding="none"
-                className={`flex items-center gap-4 px-5 py-3.5 transition-all ${anulado ? 'opacity-50' : ''}`}>
+                onClick={selectMode ? () => toggleSelect(record.id) : undefined}
+                className={`flex items-center gap-4 px-5 py-3.5 transition-all cursor-${selectMode ? 'pointer' : 'default'} ${
+                  anulado ? 'opacity-50' : ''
+                } ${
+                  selectMode && isSelected ? 'ring-2 ring-yellow-500/70' : ''
+                }`}>
+
+                {/* Checkbox in selection mode */}
+                {selectMode && (
+                  <div className={`w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                    isSelected
+                      ? 'bg-yellow-500 border-yellow-500'
+                      : ds.isDark ? 'border-gray-500' : 'border-gray-400'
+                  }`}>
+                    {isSelected && <span className="text-black text-xs font-bold">✓</span>}
+                  </div>
+                )}
+
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -321,14 +390,18 @@ const TBF = () => {
                   </div>
                 </div>
 
-                {/* Actions */}
-                <Btn variant="ghost" size="sm" leftIcon={<FaEye size={12} />} onClick={() => handleVer(record)}>
-                  Ver
-                </Btn>
-                {!anulado
-                  ? <Btn variant="icon" size="sm" onClick={() => openAnulModal(record.id)} title="Anular"><FaBan size={16} className="text-red-400" /></Btn>
-                  : <FaBan size={16} className={ds.subtle} />
-                }
+                {/* Actions — hidden in select mode */}
+                {!selectMode && (
+                  <>
+                    <Btn variant="ghost" size="sm" leftIcon={<FaEye size={12} />} onClick={() => handleVer(record)}>
+                      Ver
+                    </Btn>
+                    {!anulado
+                      ? <Btn variant="icon" size="sm" onClick={() => openAnulModal(record.id)} title="Anular"><FaBan size={16} className="text-red-400" /></Btn>
+                      : <FaBan size={16} className={ds.subtle} />
+                    }
+                  </>
+                )}
               </Card>
             );
           })}
@@ -370,6 +443,35 @@ const TBF = () => {
                 Cancelar
               </Btn>
               <Btn variant="danger" fullWidth onClick={handleAnular}>ANULAR</Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {/* ── Bulk Delete Modal ── */}
+      {showBulkModal && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-6">
+          <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4">
+            <div className="flex items-center gap-3">
+              <FaTrash className="text-red-400 shrink-0" size={16} />
+              <h3 className={`font-bold text-base ${ds.text}`}>Eliminar Comprobantes</h3>
+            </div>
+            <p className={`text-sm ${ds.muted}`}>
+              Se eliminarán permanentemente <strong className={ds.text}>{selectedIds.length} comprobante{selectedIds.length !== 1 ? 's' : ''}</strong>. Esta acción no se puede deshacer. Confirma con tu contraseña master.
+            </p>
+            <input
+              type="password" value={bulkPwd} autoFocus
+              onChange={e => { setBulkPwd(e.target.value); setBulkPwdError(''); }}
+              onKeyDown={e => e.key === 'Enter' && handleBulkDelete()}
+              placeholder="Contraseña master"
+              className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-400/50 ${ds.inputDarkFilled}`}
+            />
+            {bulkPwdError && <p className="text-red-400 text-xs">{bulkPwdError}</p>}
+            <div className="flex gap-3">
+              <Btn variant="secondary" fullWidth onClick={() => setShowBulkModal(false)}>
+                Cancelar
+              </Btn>
+              <Btn variant="danger" fullWidth onClick={handleBulkDelete}>ELIMINAR</Btn>
             </div>
           </Card>
         </div>
