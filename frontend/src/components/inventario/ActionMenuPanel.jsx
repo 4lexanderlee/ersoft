@@ -7,7 +7,7 @@ const ACTIONS = [
   { label: 'Agregar Producto o Servicio', icon: FaBoxOpen, key: 'add' },
   { label: 'Crear Categorías', icon: FaTags, key: 'categorias' },
   { label: 'Crear Lotes', icon: FaLayerGroup, key: 'lotes' },
-  { label: 'Importar dataset (MASIVO)', icon: FaFileImport, key: 'importar', disabled: true },
+  { label: 'Importar dataset (MASIVO)', icon: FaFileImport, key: 'importar' },
 ];
 
 const ActionMenuPanel = ({ onClose, onSelect, activeTab }) => {

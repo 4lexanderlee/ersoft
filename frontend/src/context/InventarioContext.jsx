@@ -31,6 +31,14 @@ export const InventarioProvider = ({ children }) => {
     setProductos(updated); save('ersoft_productos', updated);
   };
 
+  /** Returns true if barcode is already taken by another product */
+  const isBarcodeInUse = (barcode, excludeId = null) => {
+    if (!barcode || String(barcode).trim() === '') return false;
+    return productos.some(
+      p => p.codigoBarras && p.codigoBarras === String(barcode).trim() && p.id !== excludeId
+    );
+  };
+
   // ── Servicio CRUD ──────────────────────────────────────────────
   const addServicio = (s) => {
     const updated = [...servicios, { ...s, id: Date.now() }];
@@ -66,6 +74,11 @@ export const InventarioProvider = ({ children }) => {
     setLotes(updated); save('ersoft_lotes', updated);
   };
 
+  const deleteLote = (id) => {
+    const updated = lotes.filter(l => l.id !== id);
+    setLotes(updated); save('ersoft_lotes', updated);
+  };
+
   const loteActivo = lotes.find(l => l.estado === 'Activo') || null;
 
   // When a product is added, increment specific lote's totalProductos
@@ -86,12 +99,48 @@ export const InventarioProvider = ({ children }) => {
     setCategorias(updated); save('ersoft_categorias', updated);
   };
 
+  // ── Bulk import ────────────────────────────────────────────────
+  /**
+   * Bulk-insert products and services from the CSV/XLSX import modal.
+   * Each item must have: tipo, nombre, precio, and other optional fields.
+   */
+  const bulkImport = (items) => {
+    const ts = Date.now();
+    const newProductos = items
+      .filter(i => i.tipo === 'Producto')
+      .map((i, idx) => ({ ...i, id: ts + idx }));
+    const newServicios = items
+      .filter(i => i.tipo === 'Servicio')
+      .map((i, idx) => ({ ...i, id: ts + 10000 + idx }));
+
+    if (newProductos.length > 0) {
+      const updatedP = [...productos, ...newProductos];
+      setProductos(updatedP); save('ersoft_productos', updatedP);
+      // Update lote product counts
+      const loteCountMap = {};
+      newProductos.forEach(p => {
+        if (p.loteId) loteCountMap[p.loteId] = (loteCountMap[p.loteId] || 0) + 1;
+      });
+      if (Object.keys(loteCountMap).length > 0) {
+        const updatedLotes = lotes.map(l =>
+          loteCountMap[l.id] ? { ...l, totalProductos: (l.totalProductos || 0) + loteCountMap[l.id] } : l
+        );
+        setLotes(updatedLotes); save('ersoft_lotes', updatedLotes);
+      }
+    }
+    if (newServicios.length > 0) {
+      const updatedS = [...servicios, ...newServicios];
+      setServicios(updatedS); save('ersoft_servicios', updatedS);
+    }
+  };
+
   return (
     <InventarioContext.Provider value={{
-      productos, addProducto, updateProducto, deleteProducto,
+      productos, addProducto, updateProducto, deleteProducto, isBarcodeInUse,
       servicios, addServicio, updateServicio, deleteServicio,
-      lotes, loteActivo, createLote, cerrarLote, incrementLoteCount,
+      lotes, loteActivo, createLote, cerrarLote, deleteLote, incrementLoteCount,
       categorias, addCategoria, removeCategoria,
+      bulkImport,
     }}>
       {children}
     </InventarioContext.Provider>

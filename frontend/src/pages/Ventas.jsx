@@ -64,8 +64,14 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     const matchType = typeFilter === 'Todos'
       || (typeFilter === 'Productos' && item._type === 'Producto')
       || (typeFilter === 'Servicios' && item._type === 'Servicio');
-    const matchSearch = !searchText || item.nombre.toLowerCase().includes(searchText.toLowerCase());
-    const matchCat = !catFilter || item.categoria === catFilter;
+    const q = searchText.toLowerCase();
+    const matchSearch = !searchText
+      || item.nombre.toLowerCase().includes(q)
+      // Also match by barcode (exact match or starts-with for scanning)
+      || (item.codigoBarras && item.codigoBarras.includes(searchText));
+    // Support multi-category array
+    const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
+    const matchCat = !catFilter || itemCats.includes(catFilter);
     return matchType && matchSearch && matchCat;
   });
 

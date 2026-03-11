@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
+import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
 import { useDS } from '../hooks/useDS';
 import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen } from 'react-icons/fa';
@@ -8,7 +9,6 @@ import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
 import Btn from '../components/ui/Btn';
 import Card from '../components/ui/Card';
-
 import EmptyState from '../components/ui/EmptyState';
 
 // Panels
@@ -16,6 +16,68 @@ import ActionMenuPanel from '../components/inventario/ActionMenuPanel';
 import AddProductPanel from '../components/inventario/AddProductPanel';
 import AddServicioPanel from '../components/inventario/AddServicioPanel';
 import AddCategoriasPanel from '../components/inventario/AddCategoriasPanel';
+import ImportDatasetPanel from '../components/inventario/ImportDatasetPanel';
+
+/* ─── Helpers ───────────────────────────────────────────────────── */
+/** Normalise categorias field: supports both legacy string and new array */
+const getCats = (item) => {
+  if (Array.isArray(item?.categorias)) return item.categorias;
+  if (item?.categoria) return [item.categoria];
+  return [];
+};
+
+/* ─── Auth Delete Modal ─────────────────────────────────────────── */
+const AuthDeleteModal = ({ theme, ds, onConfirm, onCancel, label = 'este elemento' }) => {
+  const { login, user } = useAuth();
+  const [pwd, setPwd] = useState('');
+  const [err, setErr] = useState('');
+  const inputCls = theme === 'dark'
+    ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500'
+    : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400';
+
+  const handleConfirm = () => {
+    const r = login(user.username, pwd);
+    if (!r.success) { setErr('Contraseña incorrecta'); return; }
+    onConfirm();
+  };
+
+  return (
+    <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
+      <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4 text-center">
+        <div>
+          <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-3">
+            <span className="text-2xl">🗑️</span>
+          </div>
+          <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar</h3>
+          <p className={`text-sm mt-1 ${ds.muted}`}>Confirma con tu contraseña master para eliminar <strong>{label}</strong>.</p>
+        </div>
+        {err && <p className="text-red-400 text-sm">{err}</p>}
+        <input type="password" value={pwd} onChange={e => { setPwd(e.target.value); setErr(''); }}
+          placeholder="Contraseña master" autoFocus
+          className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${inputCls}`} />
+        <div className="flex gap-3">
+          <Btn variant="secondary" fullWidth onClick={onCancel}>Cancelar</Btn>
+          <Btn variant="danger" fullWidth onClick={handleConfirm}>Eliminar</Btn>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+/* ─── Category Chips ────────────────────────────────────────────── */
+const CatChips = ({ item, ds }) => {
+  const cats = getCats(item);
+  if (cats.length === 0) return null;
+  return (
+    <div className="flex flex-wrap gap-1 justify-center">
+      {cats.map(cat => (
+        <span key={cat} className={`text-xs px-2 py-0.5 rounded-full ${ds.isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
+          {cat}
+        </span>
+      ))}
+    </div>
+  );
+};
 
 /* ─── Product Card ─────────────────────────────────────────────── */
 const ProductCard = ({ item, onEdit, onDelete, theme }) => {
@@ -64,11 +126,7 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
       <p className={`text-xs text-center font-semibold ${
         (item.stock ?? 0) <= 0 ? 'text-red-400' : (item.stock ?? 0) <= 5 ? 'text-amber-400' : 'text-green-400'
       }`}>Stock: {item.stock ?? 'N/A'}</p>
-      {item.categoria && (
-        <span className={`text-xs text-center px-2 py-0.5 rounded-full self-center ${ds.isDark ? 'bg-gray-700 text-gray-400' : 'bg-gray-100 text-gray-500'}`}>
-          {item.categoria}
-        </span>
-      )}
+      <CatChips item={item} ds={ds} />
     </Card>
   );
 };
@@ -105,6 +163,7 @@ const ServicioCard = ({ item, onEdit, onDelete, theme }) => {
           </div>}
       <p className={`text-sm text-center ${ds.muted}`}>S/. {parseFloat(item.precio || 0).toFixed(2)}</p>
       {item.descripcion && <p className={`text-xs text-center line-clamp-2 ${ds.subtle}`}>{item.descripcion}</p>}
+      <CatChips item={item} ds={ds} />
     </Card>
   );
 };
@@ -170,10 +229,9 @@ const Inventario = () => {
   const ds = useDS();
   const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias } = useInventario();
 
-  const [activeTab, setActiveTab] = useState('productos'); // 'productos' | 'servicios'
-  const [panel, setPanel] = useState(null);   // null | 'menu' | 'add' | 'addServicio' | 'cats' | editProduct | editServicio
+  const [activeTab, setActiveTab] = useState('productos');
+  const [panel, setPanel] = useState(null);
   const [editItem, setEditItem] = useState(null);
-  const [editMode, setEditMode] = useState(null); // 'producto' | 'servicio'
 
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState('');
@@ -181,13 +239,12 @@ const Inventario = () => {
 
   const [noLoteAlert, setNoLoteAlert] = useState(false);
 
+  // Auth-delete state
+  const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'producto'|'servicio', id, nombre }
+
   const tabBarBg = 'bg-[#1a1a1a]';
 
-  const handlePlusClick = () => {
-    setPanel('menu');
-    setEditItem(null);
-    setEditMode(null);
-  };
+  const handlePlusClick = () => { setPanel('menu'); setEditItem(null); };
 
   const handleMenuSelect = (key) => {
     if (key === 'add') {
@@ -195,12 +252,20 @@ const Inventario = () => {
       setPanel(activeTab === 'productos' ? 'add' : 'addServicio');
     } else if (key === 'categorias') {
       setPanel('cats');
+    } else if (key === 'importar') {
+      setPanel('importar');
     }
   };
 
   const applyFilters = (items) => {
     let arr = [...items];
-    if (selectedCats.length > 0) arr = arr.filter(i => selectedCats.includes(i.categoria));
+    if (selectedCats.length > 0) {
+      // Match if ANY of item's categories is in selectedCats
+      arr = arr.filter(i => {
+        const cats = getCats(i);
+        return cats.some(c => selectedCats.includes(c));
+      });
+    }
     if (sortBy === 'az') arr.sort((a, b) => a.nombre.localeCompare(b.nombre));
     if (sortBy === 'za') arr.sort((a, b) => b.nombre.localeCompare(a.nombre));
     if (sortBy === 'priceDsc') arr.sort((a, b) => b.precio - a.precio);
@@ -209,6 +274,10 @@ const Inventario = () => {
     if (sortBy === 'stockAsc') arr.sort((a, b) => (a.stock || 0) - (b.stock || 0));
     return arr;
   };
+
+  // Gather all unique category names for the filter panel
+  const allProductCats = [...new Set(productos.flatMap(p => getCats(p)))];
+  const allServicioCats = [...new Set(servicios.flatMap(s => getCats(s)))];
 
   const filteredProductos = applyFilters(productos);
   const filteredServicios = applyFilters(servicios);
@@ -220,6 +289,7 @@ const Inventario = () => {
     if (panel === 'add') return <AddProductPanel onClose={() => setPanel(null)} editItem={editItem} />;
     if (panel === 'addServicio') return <AddServicioPanel onClose={() => setPanel(null)} editItem={editItem} />;
     if (panel === 'cats') return <AddCategoriasPanel onClose={() => setPanel(null)} />;
+    if (panel === 'importar') return <ImportDatasetPanel onClose={() => setPanel(null)} />;
     return null;
   };
 
@@ -260,7 +330,7 @@ const Inventario = () => {
                   onClose={() => setShowFilters(false)}
                   sortBy={sortBy} setSortBy={setSortBy}
                   selectedCats={selectedCats} setSelectedCats={setSelectedCats}
-                  categorias={activeTab === 'productos' ? categorias.productos : categorias.servicios}
+                  categorias={activeTab === 'productos' ? allProductCats : allServicioCats}
                   theme={theme}
                 />
               )}
@@ -277,7 +347,7 @@ const Inventario = () => {
                   {filteredProductos.map(p => (
                     <ProductCard key={p.id} item={p} theme={theme}
                       onEdit={() => { setEditItem(p); setPanel('add'); }}
-                      onDelete={() => deleteProducto(p.id)} />
+                      onDelete={() => setDeleteTarget({ type: 'producto', id: p.id, nombre: p.nombre })} />
                   ))}
                 </div>
               )
@@ -290,13 +360,12 @@ const Inventario = () => {
                   {filteredServicios.map(s => (
                     <ServicioCard key={s.id} item={s} theme={theme}
                       onEdit={() => { setEditItem(s); setPanel('addServicio'); }}
-                      onDelete={() => deleteServicio(s.id)} />
+                      onDelete={() => setDeleteTarget({ type: 'servicio', id: s.id, nombre: s.nombre })} />
                   ))}
                 </div>
               )
             )}
           </div>
-
 
         </div>
 
@@ -307,7 +376,7 @@ const Inventario = () => {
         </div>
       </div>
 
-      {/* Floating + button — hidden when side panel is open */}
+      {/* Floating + button */}
       {!isPanelOpen && (
         <button
           onClick={handlePlusClick}
@@ -335,6 +404,21 @@ const Inventario = () => {
             </div>
           </Card>
         </div>
+      )}
+
+      {/* Auth Delete Modal */}
+      {deleteTarget && (
+        <AuthDeleteModal
+          theme={theme}
+          ds={ds}
+          label={deleteTarget.nombre}
+          onConfirm={() => {
+            if (deleteTarget.type === 'producto') deleteProducto(deleteTarget.id);
+            else deleteServicio(deleteTarget.id);
+            setDeleteTarget(null);
+          }}
+          onCancel={() => setDeleteTarget(null)}
+        />
       )}
     </div>
   );
