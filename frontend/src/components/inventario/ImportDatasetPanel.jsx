@@ -17,6 +17,56 @@ const REQUIRED_FOR_SERVICIO = ['Nombre', 'Tipo', 'Precio'];
 const safeStr = (v) => (v == null ? '' : String(v).trim());
 
 /**
+ * Convierte un valor de fecha de Excel a formato ISO 'YYYY-MM-DD'.
+ * Maneja: número serial de Excel, string en varios formatos o vacío.
+ */
+const parseExcelDate = (v) => {
+  if (v == null || v === '') return '';
+
+  // Caso 1: xlsx con cellDates:true devuelve un objeto Date nativo
+  if (v instanceof Date) {
+    if (isNaN(v.getTime())) return '';
+    const y = v.getFullYear();
+    const m = String(v.getMonth() + 1).padStart(2, '0');
+    const d = String(v.getDate()).padStart(2, '0');
+    return `${y}-${m}-${d}`;
+  }
+
+  const s = String(v).trim();
+  if (s === '') return '';
+
+  // Caso 2: ya está en formato YYYY-MM-DD
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+
+  // Caso 3: DD/MM/YYYY o D/M/YYYY (formato peruano / europeo)
+  const dmySlash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (dmySlash) {
+    const [, d, m, y] = dmySlash;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // Caso 4: DD-MM-YYYY con guiones
+  const dmyDash = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
+  if (dmyDash) {
+    const [, d, m, y] = dmyDash;
+    return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+  }
+
+  // Caso 5: número serial de Excel
+  const num = parseFloat(s);
+  if (!isNaN(num) && num > 1000 && /^\d+(\.\d+)?$/.test(s)) {
+    try {
+      const d = XLSX.SSF.parse_date_code(num);
+      if (d && d.y > 1900) {
+        return `${d.y}-${String(d.m).padStart(2, '0')}-${String(d.d).padStart(2, '0')}`;
+      }
+    } catch { /* ignore */ }
+  }
+
+  return '';
+};
+
+/**
  * Validate a single row from the parsed sheet.
  * Returns array of error strings (empty means valid).
  */
@@ -90,20 +140,32 @@ const ImportDatasetPanel = ({ onClose }) => {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const wb = XLSX.read(data, { type: 'array' });
+        // cellDates:true hace que xlsx devuelva objetos Date para celdas de fecha.
+        // raw:true (por defecto) mantiene los Date objects sin serializar a string.
+        const wb = XLSX.read(data, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
-        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
+        const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
 
         if (raw.length < 2) {
           alert('El archivo está vacío o no tiene datos.');
           return;
         }
 
-        // Map rows to objects using column names (match by position per spec)
-        const dataRows = raw.slice(1).filter(r => r.some(c => c !== ''));
+        // Map rows to objects. Date columns get normalised to YYYY-MM-DD via parseExcelDate.
+        // Non-date fields are converted to string. rawVal is passed as-is to parseExcelDate
+        // so it receives native Date objects (from xlsx cellDates:true) directly.
+        const DATE_COLUMNS = new Set(['Vig Inicio', 'Vig Fin']);
+        const dataRows = raw.slice(1).filter(r => r.some(c => c !== '' && c != null));
         const parsed = dataRows.map(r => {
           const obj = {};
-          COLUMNS.forEach((col, idx) => { obj[col] = r[idx] != null ? String(r[idx]) : ''; });
+          COLUMNS.forEach((col, idx) => {
+            const rawVal = r[idx] != null ? r[idx] : '';
+            if (DATE_COLUMNS.has(col)) {
+              obj[col] = parseExcelDate(rawVal);
+            } else {
+              obj[col] = rawVal !== '' && rawVal != null ? String(rawVal).trim() : '';
+            }
+          });
           return obj;
         });
 
@@ -163,8 +225,8 @@ const ImportDatasetPanel = ({ onClose }) => {
         precio: parseFloat(safeStr(row['Precio'])) || 0,
         codigoDsct: safeStr(row['Dsct']) || '',
         codigoBarras: safeStr(row['Cod Barras']) || null,
-        vigenciaDesde: safeStr(row['Vig Inicio']) || '',
-        vigenciaHasta: safeStr(row['Vig Fin']) || '',
+        vigenciaDesde: parseExcelDate(row['Vig Inicio']),
+        vigenciaHasta: parseExcelDate(row['Vig Fin']),
         categorias: cats,
         imagen: safeStr(row['Imagen url']) || null,
         stock: tipo === 'Producto' ? (parseInt(safeStr(row['Stock'])) || 1) : undefined,
