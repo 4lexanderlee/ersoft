@@ -26,6 +26,26 @@ export const InventarioProvider = ({ children }) => {
     const updated = productos.map(p => p.id === id ? { ...p, ...data } : p);
     setProductos(updated); save('ersoft_productos', updated);
   };
+
+  /**
+   * Atomically update the stock of multiple products in one operation.
+   * changes: Array<{ id: productId, delta: number }>
+   *   delta > 0  → adds stock (e.g. void/annul)
+   *   delta < 0  → subtracts stock (e.g. sale)
+   * Uses the functional updater form of setProductos so it always reads
+   * the latest state, avoiding stale-closure issues when called from loops.
+   */
+  const bulkUpdateStock = (changes) => {
+    setProductos(prev => {
+      const updated = prev.map(p => {
+        const change = changes.find(c => c.id === p.id);
+        if (!change) return p;
+        return { ...p, stock: Math.max(0, (p.stock || 0) + change.delta) };
+      });
+      save('ersoft_productos', updated);
+      return updated;
+    });
+  };
   const deleteProducto = (id) => {
     const updated = productos.filter(p => p.id !== id);
     setProductos(updated); save('ersoft_productos', updated);
@@ -137,6 +157,7 @@ export const InventarioProvider = ({ children }) => {
   return (
     <InventarioContext.Provider value={{
       productos, addProducto, updateProducto, deleteProducto, isBarcodeInUse,
+      bulkUpdateStock,
       servicios, addServicio, updateServicio, deleteServicio,
       lotes, loteActivo, createLote, cerrarLote, deleteLote, incrementLoteCount,
       categorias, addCategoria, removeCategoria,

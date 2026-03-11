@@ -131,7 +131,7 @@ const TBF = () => {
   const navigate = useNavigate();
   const { theme } = useTheme();
   const { login, user } = useAuth();
-  const { updateProducto, productos } = useInventario();
+  const { bulkUpdateStock } = useInventario();
   const ds = useDS();
 
   const [comprobantes, setComprobantes] = useState([]);
@@ -187,12 +187,11 @@ const TBF = () => {
     if (!result?.success) { setAnulError('Contraseña incorrecta'); return; }
     const record = comprobantes.find(c => c.id === anulTarget);
     if (record && record.estado === 'Activo') {
-      record.items.forEach(({ id, qty, _type }) => {
-        if (_type === 'Producto') {
-          const cur = productos.find(p => p.id === id);
-          if (cur) updateProducto(cur.id, { ...cur, stock: (cur.stock || 0) + qty });
-        }
-      });
+      // Restore stock for all products in the cancelled ticket atomically
+      const changes = record.items
+        .filter(it => it._type === 'Producto')
+        .map(it => ({ id: it.id, delta: +it.qty }));
+      if (changes.length > 0) bulkUpdateStock(changes);
       const updated = comprobantes.map(c => c.id === anulTarget ? { ...c, estado: 'Anulado' } : c);
       persistComprobantes(updated);
     }

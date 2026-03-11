@@ -768,7 +768,7 @@ const PAYMENT_METHODS = [
 
 const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
-  const { updateProducto, productos } = useInventario();
+  const { updateProducto, productos, bulkUpdateStock } = useInventario();
   const { empresa } = useEmpresa();
 
   const [selectedMethod, setSelectedMethod] = useState(null);
@@ -822,12 +822,10 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
 
   /* ── helpers ── */
   const deductStock = () => {
-    cart.forEach(({ item, qty }) => {
-      if (item._type === 'Producto') {
-        const cur = productos.find(p => p.id === item.id);
-        if (cur) updateProducto(cur.id, { ...cur, stock: Math.max(0, (cur.stock || 0) - qty) });
-      }
-    });
+    const changes = cart
+      .filter(({ item }) => item._type === 'Producto')
+      .map(({ item, qty }) => ({ id: item.id, delta: -qty }));
+    if (changes.length > 0) bulkUpdateStock(changes);
   };
 
   const openTicket = () => {
