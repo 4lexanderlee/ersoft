@@ -22,8 +22,8 @@ const MainLayout = () => {
         <Header />
 
         {/* Page content — footer is the last element so it only shows on scroll */}
-        <main className="flex-1 overflow-x-hidden overflow-y-auto flex flex-col">
-          <div className="flex-1 p-6 flex flex-col">
+        <main className="flex-1 overflow-x-hidden overflow-y-auto flex flex-col min-h-0">
+          <div className="flex-1 p-6 flex flex-col min-h-0">
             <Outlet />
           </div>
           <AppFooter />

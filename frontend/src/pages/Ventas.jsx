@@ -123,13 +123,13 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const dropBg = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-800';
 
   return (
-    <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
+    <div className={`flex flex-col flex-1 min-h-0 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Main */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Products area */}
-        <div className="flex-1 flex flex-col overflow-hidden">
+        <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Search & Filter Bar */}
           <div className="flex items-center gap-3 px-6 py-4 flex-wrap">
             {/* Tipo dropdown */}
@@ -476,13 +476,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const canAddClient = !client && (clientForm.nombre.trim() || clientForm.apellidos.trim());
 
   return (
-    <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
+    <div className={`flex flex-col flex-1 min-h-0 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Left: Client form */}
-        <div className="flex-1 overflow-y-auto px-8 py-5 space-y-4">
+        <div className="flex-1 min-h-0 overflow-y-auto px-8 py-5 space-y-4">
           {/* Doc search bar */}
           <div className="flex items-center gap-3">
             <select value={docType} onChange={e => { setDocType(e.target.value); setDocNumber(''); setClient(null); setNotFound(false); setClientErrors({}); }}
