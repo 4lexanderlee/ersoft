@@ -414,7 +414,7 @@ const TBF = () => {
           MONTO FILTRADO: S/. {totalFiltrado.toFixed(2)}
         </span>
         <Btn variant="secondary" onClick={handleReporte}
-          className="!border-white !text-white hover:!bg-white/10">
+          className="!border-white !text-white hover:!bg-yellow-500 hover:!border-yellow-500 hover:!text-black transition-colors duration-300 cursor-pointer">
           GENERAR REPORTE
         </Btn>
       </div>

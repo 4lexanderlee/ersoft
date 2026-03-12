@@ -414,7 +414,7 @@ const Inventario = () => {
       {!isPanelOpen && (
         <button
           onClick={handlePlusClick}
-          className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-[#1a1a1a] hover:bg-gray-700 text-white shadow-2xl flex items-center justify-center transition-all hover:scale-110 active:scale-95 z-40"
+          className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-[#1a1a1a] hover:bg-yellow-500 hover:text-black text-white shadow-2xl flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 active:scale-95 z-40"
         >
           <FaPlus size={22} />
         </button>

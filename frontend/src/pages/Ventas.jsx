@@ -318,7 +318,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                   <button
                     onClick={() => { setShowCart(false); onNext(); }}
                     disabled={cart.length === 0}
-                    className="flex-1 py-2.5 rounded-full bg-gray-800 hover:bg-gray-700 text-white font-bold text-sm disabled:opacity-40 transition-colors">
+                    className="flex-1 py-2.5 rounded-full bg-gray-800 hover:bg-yellow-500 hover:text-black text-white font-bold text-sm disabled:opacity-40 transition-colors duration-300 cursor-pointer">
                     SIGUIENTE
                   </button>
                 </div>
@@ -333,7 +333,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
         <button
           onClick={onNext}
           disabled={cart.length === 0}
-          className="fixed bottom-8 right-8 flex items-center gap-3 px-7 py-3 bg-gray-700 hover:bg-gray-600 disabled:opacity-40 text-white font-bold rounded-full shadow-2xl transition-all hover:scale-105 z-40"
+          className="fixed bottom-8 right-8 flex items-center gap-3 px-7 py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black disabled:opacity-40 text-white font-bold rounded-full shadow-2xl transition-all duration-300 cursor-pointer hover:scale-105 z-40"
         >
           SIGUIENTE <FaArrowLeft className="rotate-180" />
         </button>
@@ -679,7 +679,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
               <span className={text}>S/. {total.toFixed(2)}</span>
             </div>
             <button onClick={() => onNext({ client: clientForm, saleType, discount, total })}
-              className="w-full py-3 bg-gray-700 hover:bg-gray-600 text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2">
+              className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
               IR A PAGAR <FaArrowLeft className="rotate-180" />
             </button>
           </div>
