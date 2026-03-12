@@ -302,7 +302,7 @@ const Inventario = () => {
   };
 
   return (
-    <div className={`flex flex-col h-full -m-6 relative overflow-hidden ${ds.pageBg}`}>
+    <div className={`flex flex-col flex-1 -m-6 relative overflow-hidden ${ds.pageBg}`}>
 
       {/* Header */}
       <PageHeader onBack={() => navigate('/principal')} />

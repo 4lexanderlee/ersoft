@@ -239,7 +239,7 @@ const TBF = () => {
   const selectCls = `flex items-center gap-2 px-4 py-2.5 border rounded-full text-sm font-medium min-w-[120px] outline-none transition-colors ${ds.inputCls}`;
 
   return (
-    <div className={`flex flex-col h-full -m-6 ${ds.pageBg}`}>
+    <div className={`flex flex-col flex-1 -m-6 ${ds.pageBg}`}>
 
       {/* ── Header ── */}
       <PageHeader onBack={() => navigate('/principal')} />

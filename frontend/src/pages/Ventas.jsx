@@ -123,7 +123,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const dropBg = theme === 'dark' ? 'bg-gray-800 border-gray-700 text-white' : 'bg-white border-gray-200 text-gray-800';
 
   return (
-    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+    <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Main */}
@@ -476,7 +476,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const canAddClient = !client && (clientForm.nombre.trim() || clientForm.apellidos.trim());
 
   return (
-    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+    <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Body */}
@@ -909,7 +909,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   };
 
   return (
-    <div className={`flex flex-col h-full -m-6 ${pageBg}`}>
+    <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
 
       {/* Body */}
