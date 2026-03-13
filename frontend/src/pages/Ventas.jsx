@@ -1033,6 +1033,7 @@ const PAYMENT_METHODS = [
   { key: 'digital', label: 'Billetera electrónica', sub: 'Yape · Plin · izipay' },
   { key: 'bank',    label: 'Transferencia Bancaria o CCI', sub: '' },
   { key: 'cash',    label: 'En efectivo', sub: '' },
+  { key: 'pos',     label: 'POS', sub: 'Tarjeta de crédito / débito' },
 ];
 
 const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
@@ -1207,6 +1208,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
               )}
               {pm.key === 'bank'  && <span className="text-2xl mt-3">📱</span>}
               {pm.key === 'cash'  && <span className="text-2xl mt-3">💰</span>}
+              {pm.key === 'pos'   && <span className="text-2xl mt-3">💳</span>}
               {pm.sub && <p className={`text-xs mt-1 ${subTx}`}>{pm.sub}</p>}
             </button>
           ))}

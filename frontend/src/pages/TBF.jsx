@@ -22,7 +22,7 @@ const fmtDate = (iso) => {
 const buildTicketHTMLFromRecord = (record) => {
   const { empresa, items = [], cliente, tipo, fecha, total, subtotal, discount, metodoPago, id, vendedor } = record;
   const date = fmtDate(fecha);
-  const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo' }[metodoPago] || metodoPago || '—';
+  const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[metodoPago] || metodoPago || '—';
   const clientName = cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : 'Consumidor final';
   const rows = items.map(it => `
     <tr>
@@ -126,6 +126,7 @@ const buildReporteHTML = (records, empresa) => {
 
 const TIPOS   = ['Todos', 'Ticket', 'Boleta', 'Factura', 'Cotizar'];
 const ESTADOS = ['Todos', 'Activo', 'Anulado'];
+const METODOS_PAGO = ['Todos', 'Billetera electrónica', 'Transferencia / CCI', 'Efectivo', 'POS'];
 
 /* ─── TBF Page ─── */
 const TBF = () => {
@@ -142,12 +143,14 @@ const TBF = () => {
   const [fechaDesde,   setFechaDesde]   = useState('');
   const [fechaHasta,   setFechaHasta]   = useState('');
   const [estadoFilter, setEstadoFilter] = useState('Todos');
+  const [pagoFilter,   setPagoFilter]   = useState('Todos');
   const [applied,      setApplied]      = useState({});
   const [anulTarget,   setAnulTarget]   = useState(null);
   const [anulPwd,      setAnulPwd]      = useState('');
   const [anulError,    setAnulError]    = useState('');
   const [showTipoMenu,   setShowTipoMenu]   = useState(false);
   const [showEstadoMenu, setShowEstadoMenu] = useState(false);
+  const [showPagoMenu,   setShowPagoMenu]   = useState(false);
 
   // Bulk selection state
   const [selectMode,    setSelectMode]    = useState(false);
@@ -174,13 +177,17 @@ const TBF = () => {
     if (f.estado && f.estado !== 'Todos' && c.estado !== f.estado) return false;
     if (f.desde  && c.fecha < f.desde) return false;
     if (f.hasta  && c.fecha > f.hasta + 'T23:59:59') return false;
+    if (f.pago   && f.pago !== 'Todos') {
+      const pLab = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[c.metodoPago] || c.metodoPago || '—';
+      if (pLab !== f.pago) return false;
+    }
     return true;
   });
 
   const totalFiltrado = filtered.filter(c => c.estado === 'Activo').reduce((s, c) => s + (c.total || 0), 0);
 
   const handleApply = () =>
-    setApplied({ tipo: tipoFilter, id: idFilter, doc: docFilter, estado: estadoFilter, desde: fechaDesde, hasta: fechaHasta });
+    setApplied({ tipo: tipoFilter, id: idFilter, doc: docFilter, estado: estadoFilter, desde: fechaDesde, hasta: fechaHasta, pago: pagoFilter });
 
   const handleVer = (record) => {
     const html = buildTicketHTMLFromRecord(record);
@@ -253,7 +260,7 @@ const TBF = () => {
 
           {/* Tipo dropdown */}
           <div className="relative">
-            <button onClick={() => { setShowTipoMenu(v => !v); setShowEstadoMenu(false); }} className={selectCls}>
+            <button onClick={() => { setShowTipoMenu(v => !v); setShowEstadoMenu(false); setShowPagoMenu(false); }} className={selectCls}>
               {tipoFilter} <span className="text-xs ml-auto">▾</span>
             </button>
             {showTipoMenu && (
@@ -296,7 +303,7 @@ const TBF = () => {
         {/* Filter Row 2 */}
         <div className="flex items-center gap-3">
           <div className="relative">
-            <button onClick={() => { setShowEstadoMenu(v => !v); setShowTipoMenu(false); }} className={selectCls}>
+            <button onClick={() => { setShowEstadoMenu(v => !v); setShowTipoMenu(false); setShowPagoMenu(false); }} className={selectCls}>
               {estadoFilter} <span className="text-xs ml-auto">▾</span>
             </button>
             {showEstadoMenu && (
@@ -305,6 +312,22 @@ const TBF = () => {
                   <button key={e} onClick={() => { setEstadoFilter(e); setShowEstadoMenu(false); }}
                     className={`${dropItemBase} hover:bg-yellow-500/10 ${estadoFilter === e ? 'font-bold text-yellow-500' : ''}`}>
                     {e}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="relative">
+            <button onClick={() => { setShowPagoMenu(v => !v); setShowTipoMenu(false); setShowEstadoMenu(false); }} className={selectCls}>
+              {pagoFilter} <span className="text-xs ml-auto">▾</span>
+            </button>
+            {showPagoMenu && (
+              <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-1 ${ds.dropBg}`}>
+                {METODOS_PAGO.map(m => (
+                  <button key={m} onClick={() => { setPagoFilter(m); setShowPagoMenu(false); }}
+                    className={`${dropItemBase} hover:bg-yellow-500/10 ${pagoFilter === m ? 'font-bold text-yellow-500' : ''}`}>
+                    {m}
                   </button>
                 ))}
               </div>
