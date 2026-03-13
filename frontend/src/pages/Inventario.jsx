@@ -4,7 +4,7 @@ import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
 import { useDS } from '../hooks/useDS';
-import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen, FaSearch } from 'react-icons/fa';
+import { FaPlus, FaEllipsisV, FaImage, FaBoxOpen, FaSearch, FaCheckSquare, FaTrash } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
 import Btn from '../components/ui/Btn';
@@ -80,7 +80,7 @@ const CatChips = ({ item, ds }) => {
 };
 
 /* ─── Product Card ─────────────────────────────────────────────── */
-const ProductCard = ({ item, onEdit, onDelete, theme }) => {
+const ProductCard = ({ item, onEdit, onDelete, theme, selectMode, isSelected, toggleSelect }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const ds = useDS();
@@ -92,26 +92,41 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
   }, []);
 
   return (
-    <Card className="flex flex-col gap-2 relative" padding="sm">
+    <Card className={`flex flex-col gap-2 relative transition-all cursor-${selectMode ? 'pointer' : 'default'} ${
+      selectMode && isSelected ? 'ring-2 ring-yellow-500/70 border-yellow-500/50' : 'hover:border-yellow-500/30'
+    }`} padding="sm" onClick={selectMode ? () => toggleSelect(item.id) : undefined}>
+      {/* Checkbox in selection mode */}
+      {selectMode && (
+        <div className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+          isSelected
+            ? 'bg-yellow-500 border-yellow-500'
+            : ds.isDark ? 'border-gray-500 bg-gray-800' : 'border-gray-400 bg-white'
+        }`}>
+          {isSelected && <span className="text-black text-xs font-bold">✓</span>}
+        </div>
+      )}
+
       {/* 3-dot menu */}
-      <div ref={menuRef} className="absolute top-2 right-2 z-10">
-        <button onClick={() => setMenuOpen(!menuOpen)}
-          className={`p-1.5 rounded-lg hover:bg-black/10 transition-colors ${ds.iconColor}`}>
-          <FaEllipsisV size={13} />
-        </button>
-        {menuOpen && (
-          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
-            <button onClick={() => { setMenuOpen(false); onEdit(); }}
-              className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-blue-500/10 text-blue-500 transition-colors">
-              ✏️ Editar
-            </button>
-            <button onClick={() => { setMenuOpen(false); onDelete(); }}
-              className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-red-500/10 text-red-500 transition-colors">
-              🗑️ Eliminar
-            </button>
-          </div>
-        )}
-      </div>
+      {!selectMode && (
+        <div ref={menuRef} className="absolute top-2 right-2 z-10">
+          <button onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }}
+            className={`p-1.5 rounded-lg hover:bg-black/10 transition-colors ${ds.iconColor}`}>
+            <FaEllipsisV size={13} />
+          </button>
+          {menuOpen && (
+            <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
+              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(); }}
+                className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-blue-500/10 text-blue-500 transition-colors">
+                ✏️ Editar
+              </button>
+              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(); }}
+                className="w-full text-left px-4 py-2 text-sm flex items-center gap-2 hover:bg-red-500/10 text-red-500 transition-colors">
+                🗑️ Eliminar
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${ds.text}`}>{item.nombre}</p>
 
@@ -132,7 +147,7 @@ const ProductCard = ({ item, onEdit, onDelete, theme }) => {
 };
 
 /* ─── Servicio Card ─────────────────────────────────────────────── */
-const ServicioCard = ({ item, onEdit, onDelete, theme }) => {
+const ServicioCard = ({ item, onEdit, onDelete, theme, selectMode, isSelected, toggleSelect }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const ds = useDS();
@@ -143,18 +158,34 @@ const ServicioCard = ({ item, onEdit, onDelete, theme }) => {
   }, []);
 
   return (
-    <Card className="flex flex-col gap-2 relative" padding="sm">
-      <div ref={menuRef} className="absolute top-2 right-2 z-10">
-        <button onClick={() => setMenuOpen(!menuOpen)} className={`p-1.5 rounded-lg hover:bg-black/10 ${ds.iconColor}`}>
-          <FaEllipsisV size={13} />
-        </button>
-        {menuOpen && (
-          <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
-            <button onClick={() => { setMenuOpen(false); onEdit(); }} className="w-full text-left px-4 py-2 text-sm text-blue-500 hover:bg-blue-500/10">✏️ Editar</button>
-            <button onClick={() => { setMenuOpen(false); onDelete(); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-500/10">🗑️ Eliminar</button>
-          </div>
-        )}
-      </div>
+    <Card className={`flex flex-col gap-2 relative transition-all cursor-${selectMode ? 'pointer' : 'default'} ${
+      selectMode && isSelected ? 'ring-2 ring-yellow-500/70 border-yellow-500/50' : 'hover:border-yellow-500/30'
+    }`} padding="sm" onClick={selectMode ? () => toggleSelect(item.id) : undefined}>
+      {/* Checkbox in selection mode */}
+      {selectMode && (
+        <div className={`absolute top-2 left-2 z-10 w-5 h-5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+          isSelected
+            ? 'bg-yellow-500 border-yellow-500'
+            : ds.isDark ? 'border-gray-500 bg-gray-800' : 'border-gray-400 bg-white'
+        }`}>
+          {isSelected && <span className="text-black text-xs font-bold">✓</span>}
+        </div>
+      )}
+
+      {/* 3-dot menu */}
+      {!selectMode && (
+        <div ref={menuRef} className="absolute top-2 right-2 z-10">
+          <button onClick={(e) => { e.stopPropagation(); setMenuOpen(!menuOpen); }} className={`p-1.5 rounded-lg hover:bg-black/10 ${ds.iconColor}`}>
+            <FaEllipsisV size={13} />
+          </button>
+          {menuOpen && (
+            <div className={`absolute right-0 top-8 w-32 rounded-xl border shadow-xl z-20 py-1 ${ds.dropBg}`}>
+              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onEdit(); }} className="w-full text-left px-4 py-2 text-sm text-blue-500 hover:bg-blue-500/10">✏️ Editar</button>
+              <button onClick={(e) => { e.stopPropagation(); setMenuOpen(false); onDelete(); }} className="w-full text-left px-4 py-2 text-sm text-red-500 hover:bg-red-500/10">🗑️ Eliminar</button>
+            </div>
+          )}
+        </div>
+      )}
       <p className={`text-xs font-bold uppercase tracking-wide pr-8 ${ds.text}`}>{item.nombre}</p>
       {item.imagen
         ? <img src={item.imagen} alt={item.nombre} className="w-full aspect-square rounded-xl object-contain" />
@@ -242,6 +273,7 @@ const Inventario = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const ds = useDS();
+  const { login, user } = useAuth();
   const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias, lotes } = useInventario();
 
   const [activeTab, setActiveTab] = useState('productos');
@@ -258,6 +290,13 @@ const Inventario = () => {
 
   // Auth-delete state
   const [deleteTarget, setDeleteTarget] = useState(null); // { type: 'producto'|'servicio', id, nombre }
+
+  // Bulk selection state
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [showBulkModal, setShowBulkModal] = useState(false);
+  const [bulkPwd, setBulkPwd] = useState('');
+  const [bulkPwdError, setBulkPwdError] = useState('');
 
   const tabBarBg = 'bg-[#1a1a1a]';
 
@@ -308,6 +347,32 @@ const Inventario = () => {
 
   const filteredProductos = applyFilters(productos);
   const filteredServicios = applyFilters(servicios);
+  
+  // ── Bulk select helpers ──
+  const enterSelectMode = () => {
+    setSelectedIds(activeTab === 'productos' ? filteredProductos.map(p => p.id) : filteredServicios.map(s => s.id));
+    setSelectMode(true);
+  };
+  const exitSelectMode = () => { setSelectMode(false); setSelectedIds([]); };
+  const toggleSelect = (id) => setSelectedIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  const selectAll = () => setSelectedIds(activeTab === 'productos' ? filteredProductos.map(p => p.id) : filteredServicios.map(s => s.id));
+  const deselectAll = () => setSelectedIds([]);
+
+  const openBulkDeleteModal = () => { setBulkPwd(''); setBulkPwdError(''); setShowBulkModal(true); };
+  const handleBulkDelete = () => {
+    const result = login(user?.username || '', bulkPwd);
+    if (!result?.success) { setBulkPwdError('Contraseña incorrecta'); return; }
+    
+    // Delete selected items based on activeTab
+    if (activeTab === 'productos') {
+      selectedIds.forEach(id => deleteProducto(id));
+    } else {
+      selectedIds.forEach(id => deleteServicio(id));
+    }
+    
+    setShowBulkModal(false);
+    exitSelectMode();
+  };
 
   const isPanelOpen = panel !== null;
 
@@ -392,6 +457,30 @@ const Inventario = () => {
                 ✕
               </button>
             )}
+            
+            {/* Selection Actions */}
+            <div className="ml-auto">
+              {!selectMode ? (
+                <Btn variant="secondary" size="sm" leftIcon={<FaCheckSquare size={12} />} onClick={enterSelectMode}>
+                  Seleccionar
+                </Btn>
+              ) : (
+                <div className="flex items-center gap-2">
+                  <span className={`text-xs font-semibold ${ds.muted}`}>{selectedIds.length} seleccionado{selectedIds.length !== 1 ? 's' : ''}</span>
+                  <Btn variant="secondary" size="sm" onClick={selectAll}>Todo</Btn>
+                  <Btn variant="secondary" size="sm" onClick={deselectAll}>Ninguno</Btn>
+                  <Btn
+                    variant="danger" size="sm"
+                    leftIcon={<FaTrash size={11} />}
+                    onClick={openBulkDeleteModal}
+                    disabled={selectedIds.length === 0}>
+                    Eliminar
+                  </Btn>
+                  <Btn variant="secondary" size="sm" onClick={exitSelectMode}>Cancelar</Btn>
+                </div>
+              )}
+            </div>
+            
           </div>
 
           {/* Grid */}
@@ -403,6 +492,7 @@ const Inventario = () => {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {filteredProductos.map(p => (
                     <ProductCard key={p.id} item={p} theme={theme}
+                      selectMode={selectMode} isSelected={selectedIds.includes(p.id)} toggleSelect={toggleSelect}
                       onEdit={() => { setEditItem(p); setPanel('add'); }}
                       onDelete={() => setDeleteTarget({ type: 'producto', id: p.id, nombre: p.nombre })} />
                   ))}
@@ -416,6 +506,7 @@ const Inventario = () => {
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                   {filteredServicios.map(s => (
                     <ServicioCard key={s.id} item={s} theme={theme}
+                      selectMode={selectMode} isSelected={selectedIds.includes(s.id)} toggleSelect={toggleSelect}
                       onEdit={() => { setEditItem(s); setPanel('addServicio'); }}
                       onDelete={() => setDeleteTarget({ type: 'servicio', id: s.id, nombre: s.nombre })} />
                   ))}
@@ -434,7 +525,7 @@ const Inventario = () => {
       </div>
 
       {/* Floating + button */}
-      {!isPanelOpen && (
+      {!isPanelOpen && !selectMode && (
         <button
           onClick={handlePlusClick}
           className="fixed bottom-8 right-8 w-14 h-14 rounded-full bg-[#1a1a1a] hover:bg-yellow-500 hover:text-black text-white shadow-2xl flex items-center justify-center transition-all duration-300 cursor-pointer hover:scale-110 active:scale-95 z-40"
@@ -463,7 +554,7 @@ const Inventario = () => {
         </div>
       )}
 
-      {/* Auth Delete Modal */}
+      {/* Auth Delete Modal (Individual Delete) */}
       {deleteTarget && (
         <AuthDeleteModal
           theme={theme}
@@ -476,6 +567,32 @@ const Inventario = () => {
           }}
           onCancel={() => setDeleteTarget(null)}
         />
+      )}
+
+      {/* Bulk Delete Modal */}
+      {showBulkModal && (
+        <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
+          <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4 text-center">
+            <div>
+              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-3">
+                <FaTrash className="text-red-400" size={20} />
+              </div>
+              <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar Múltiples</h3>
+              <p className={`text-sm mt-1 ${ds.muted}`}>
+                Confirma con tu contraseña master para eliminar <strong>{selectedIds.length} elemento{selectedIds.length !== 1 ? 's' : ''}</strong> de forma permanente.
+              </p>
+            </div>
+            {bulkPwdError && <p className="text-red-400 text-sm">{bulkPwdError}</p>}
+            <input type="password" value={bulkPwd} onChange={e => { setBulkPwd(e.target.value); setBulkPwdError(''); }}
+              placeholder="Contraseña master" autoFocus
+              onKeyDown={e => e.key === 'Enter' && handleBulkDelete()}
+              className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
+            <div className="flex gap-3">
+              <Btn variant="secondary" fullWidth onClick={() => setShowBulkModal(false)}>Cancelar</Btn>
+              <Btn variant="danger" fullWidth onClick={handleBulkDelete}>Eliminar Todo</Btn>
+            </div>
+          </Card>
+        </div>
       )}
     </div>
   );

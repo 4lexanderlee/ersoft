@@ -47,8 +47,11 @@ export const InventarioProvider = ({ children }) => {
     });
   };
   const deleteProducto = (id) => {
-    const updated = productos.filter(p => p.id !== id);
-    setProductos(updated); save('ersoft_productos', updated);
+    setProductos(prev => {
+      const updated = prev.filter(p => p.id !== id);
+      save('ersoft_productos', updated);
+      return updated;
+    });
   };
 
   /** Returns true if barcode is already taken by another product */
@@ -69,8 +72,11 @@ export const InventarioProvider = ({ children }) => {
     setServicios(updated); save('ersoft_servicios', updated);
   };
   const deleteServicio = (id) => {
-    const updated = servicios.filter(s => s.id !== id);
-    setServicios(updated); save('ersoft_servicios', updated);
+    setServicios(prev => {
+      const updated = prev.filter(s => s.id !== id);
+      save('ersoft_servicios', updated);
+      return updated;
+    });
   };
 
   // ── Lotes ──────────────────────────────────────────────────────
