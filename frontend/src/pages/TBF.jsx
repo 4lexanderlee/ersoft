@@ -20,7 +20,7 @@ const fmtDate = (iso) => {
 };
 
 const buildTicketHTMLFromRecord = (record) => {
-  const { empresa, items = [], cliente, tipo, fecha, total, subtotal, discount, metodoPago, id, vendedor } = record;
+  const { empresa, items = [], cliente, tipo, fecha, total, subtotal, discount, discountAmt, metodoPago, id, vendedor } = record;
   const date = fmtDate(fecha);
   const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[metodoPago] || metodoPago || '—';
   const clientName = cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : 'Consumidor final';
@@ -31,7 +31,9 @@ const buildTicketHTMLFromRecord = (record) => {
       <td style="text-align:right">S/. ${it.precio.toFixed(2)}</td>
       <td style="text-align:right">S/. ${(it.qty * it.precio).toFixed(2)}</td>
     </tr>`).join('');
-  const discountRow = discount ? `<tr><td colspan="3" style="text-align:right">Descuento (${(discount*100).toFixed(0)}%)</td><td style="text-align:right;color:green">-S/. ${(subtotal*discount).toFixed(2)}</td></tr>` : '';
+  const dscAmt = discountAmt || (discount ? subtotal * discount : 0);
+  const dscLabel = (discount > 0 && discount < 1) ? `Descuento (${(discount*100).toFixed(0)}%)` : 'Descuento';
+  const discountRow = dscAmt > 0 ? `<tr><td colspan="3" style="text-align:right">${dscLabel}</td><td style="text-align:right;color:green">-S/. ${dscAmt.toFixed(2)}</td></tr>` : '';
 
   const logoTag = empresa?.logoPath
     ? `<div style="text-align:center;margin-bottom:8px"><img src="${empresa.logoPath}" alt="logo" style="max-height:70px;max-width:200px;object-fit:contain" /></div>`

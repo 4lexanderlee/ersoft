@@ -10,7 +10,10 @@ const load = (key, fallback) => {
 const save = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
 export const InventarioProvider = ({ children }) => {
-  const [productos, setProductos] = useState(() => load('ersoft_productos', []));
+  const [productos, setProductos] = useState(() => {
+    const data = load('ersoft_productos', []);
+    return data.map(p => ({ ...p, costo: p.costo || 0 }));
+  });
   const [servicios, setServicios] = useState(() => load('ersoft_servicios', []));
   const [lotes, setLotes] = useState(() => load('ersoft_lotes', []));
   const [categorias, setCategorias] = useState(() =>

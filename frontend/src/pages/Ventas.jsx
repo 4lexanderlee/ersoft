@@ -392,7 +392,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const [notFound, setNotFound] = useState(false);
   const [saleType, setSaleType] = useState('Ticket');
   const [discountCode, setDiscountCode] = useState('');
-  const [discount, setDiscount] = useState(0);
+  const [appliedCodes, setAppliedCodes] = useState([]);
   const [discountMsg, setDiscountMsg] = useState('');
   const [addClientMsg, setAddClientMsg] = useState('');
 
@@ -417,8 +417,47 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   }, []);
 
   const subtotal = cart.reduce((s, { item, qty }) => s + qty * parseFloat(item.precio || 0), 0);
-  const discountAmt = subtotal * discount;
-  const total = subtotal - discountAmt;
+
+  const calcDiscount = () => {
+     if (appliedCodes.length === 0) return { rate: 0, amt: 0 };
+     let amt = 0;
+     let globalRateSum = 0;
+     const today = new Date();
+     today.setHours(0,0,0,0);
+
+     cart.forEach(({item, qty}) => {
+       if (item.codigoDsct) {
+         const itemCode = item.codigoDsct.trim().toUpperCase();
+         if (appliedCodes.includes(itemCode)) {
+           const from = item.vigenciaDesde ? new Date(item.vigenciaDesde + 'T00:00:00') : null;
+           const to = item.vigenciaHasta ? new Date(item.vigenciaHasta + 'T23:59:59') : null;
+           if ((!from || today >= from) && (!to || today <= to)) {
+              let val = parseInt(item.valorDsct, 10) || 0;
+              if (item.tipoDsct === '%') {
+                   amt += ((parseFloat(item.precio) || 0) * (val / 100)) * qty;
+              } else {
+                   amt += val * qty;
+              }
+           }
+         }
+       }
+     });
+
+     appliedCodes.forEach(code => {
+       if (DISCOUNT_CODES[code]) {
+          globalRateSum += DISCOUNT_CODES[code];
+       }
+     });
+
+     if (globalRateSum > 1) globalRateSum = 1;
+     let totalAmt = amt + (subtotal * globalRateSum);
+     if (totalAmt > subtotal) totalAmt = subtotal;
+
+     return { rate: globalRateSum, amt: totalAmt };
+  };
+
+  const { rate: discount, amt: discountAmt } = calcDiscount();
+  const total = Math.max(0, subtotal - discountAmt);
 
   const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
   const inputCls = theme === 'dark' ? 'bg-transparent border-gray-600 text-white placeholder-gray-500' : 'bg-transparent border-gray-300 text-gray-900 placeholder-gray-400';
@@ -498,14 +537,40 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   };
 
   const handleApplyDiscount = () => {
-    const rate = DISCOUNT_CODES[discountCode.trim().toUpperCase()];
-    if (rate) {
-      setDiscount(rate);
-      setDiscountMsg(`✓ Descuento del ${(rate * 100).toFixed(0)}% aplicado`);
-    } else {
-      setDiscount(0);
-      setDiscountMsg('✗ Código inválido');
+    const code = discountCode.trim().toUpperCase();
+    if (!code) {
+       setDiscountMsg('');
+       return;
     }
+    
+    if (appliedCodes.includes(code)) {
+       setDiscountMsg('✗ Código ya aplicado');
+       return;
+    }
+
+    const today = new Date();
+    today.setHours(0,0,0,0);
+    
+    let itemMatch = cart.some(({item}) => {
+       if (item.codigoDsct && item.codigoDsct.trim().toUpperCase() === code) {
+         const from = item.vigenciaDesde ? new Date(item.vigenciaDesde + 'T00:00:00') : null;
+         const to = item.vigenciaHasta ? new Date(item.vigenciaHasta + 'T23:59:59') : null;
+         return (!from || today >= from) && (!to || today <= to);
+       }
+       return false;
+    });
+
+    if (itemMatch || DISCOUNT_CODES[code]) {
+       setAppliedCodes([...appliedCodes, code]);
+       setDiscountMsg('✓ Descuento aplicado');
+       setDiscountCode('');
+    } else {
+       setDiscountMsg('✗ Código inválido o no aplica a estos productos');
+    }
+  };
+
+  const handleRemoveDiscount = (codeToRemove) => {
+     setAppliedCodes(appliedCodes.filter(c => c !== codeToRemove));
   };
 
   const docPlaceholder = { DNI: '8 dígitos', CE: '9 dígitos', RUC: '11 dígitos' };
@@ -533,7 +598,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   }, [docType, availableSaleTypes, saleType]);
 
   const handleCotizar = () => {
-    const saleData = { client: clientForm, saleType, discount, subtotal, total };
+    const saleData = { client: clientForm, saleType, discount, discountAmt, subtotal, total };
     const html = buildProformaHTML(empresa, cart, saleData, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
@@ -697,18 +762,30 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
           {/* Discount Code */}
           <div className={`rounded-2xl border p-4 ${sectionBg}`}>
             <p className={`font-bold italic text-sm mb-2 ${text}`}>Código de DSCT</p>
-            <div className="flex items-center gap-2">
-              <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Ingrese el COD aquí</span>
-              <input value={discountCode} onChange={e => setDiscountCode(e.target.value)}
-                className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls}`} />
-              <button onClick={handleApplyDiscount}
-                className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold rounded-full">
-                APLICAR
-              </button>
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Ingrese el COD aquí</span>
+                <input value={discountCode} onChange={e => setDiscountCode(e.target.value)}
+                  className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls}`} />
+                <button onClick={handleApplyDiscount}
+                  className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold rounded-full">
+                  APLICAR
+                </button>
+              </div>
+              {discountMsg && (
+                <p className={`text-xs ${discountMsg.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>{discountMsg}</p>
+              )}
+              {appliedCodes.length > 0 && (
+                <div className="flex flex-wrap gap-2 mt-2">
+                  {appliedCodes.map(code => (
+                    <div key={code} className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${theme === 'dark' ? 'bg-green-900/30 text-green-400 border border-green-700' : 'bg-green-50 text-green-700 border border-green-200'}`}>
+                      {code}
+                      <button onClick={() => handleRemoveDiscount(code)} className="ml-1 hover:text-red-500"><FaTimes size={10} /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            {discountMsg && (
-              <p className={`text-xs mt-2 ${discountMsg.startsWith('✓') ? 'text-green-400' : 'text-red-400'}`}>{discountMsg}</p>
-            )}
           </div>
         </div>
 
@@ -748,7 +825,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
                 COTIZAR
               </button>
             ) : (
-              <button onClick={() => onNext({ client: clientForm, saleType, discount, total, subtotal })}
+              <button onClick={() => onNext({ client: clientForm, saleType, discount, discountAmt, total, subtotal })}
                 className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
                 IR A PAGAR <FaArrowLeft className="rotate-180" />
               </button>
@@ -777,9 +854,12 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
       <td style="text-align:right">S/. ${parseFloat(item.precio || 0).toFixed(2)}</td>
       <td style="text-align:right">S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}</td>
     </tr>`).join('');
-  const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo' }[payMethod] || payMethod;
+  const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[payMethod] || payMethod;
   const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'Consumidor final';
-  const discount = saleData?.discount ? `<tr><td colspan="3" style="text-align:right">Descuento</td><td style="text-align:right;color:green">-S/. ${(saleData.subtotal * saleData.discount).toFixed(2)}</td></tr>` : '';
+  
+  const dscAmt = saleData?.discountAmt || (saleData?.discount ? saleData.subtotal * saleData.discount : 0);
+  const discountLabel = (saleData?.discount > 0 && saleData?.discount < 1) ? `Descuento (${(saleData.discount * 100).toFixed(0)}%)` : 'Descuento';
+  const discount = dscAmt > 0 ? `<tr><td colspan="3" style="text-align:right">${discountLabel}</td><td style="text-align:right;color:green">-S/. ${dscAmt.toFixed(2)}</td></tr>` : '';
 
   const logoTag = empresa?.logoPath
     ? `<div style="text-align:center;margin-bottom:8px"><img src="${empresa.logoPath}" alt="logo" style="max-height:70px;max-width:200px;object-fit:contain" /></div>`
@@ -994,7 +1074,7 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
             <td class="py-1">Subtotal:</td>
             <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${subTotalStr}</td>
           </tr>
-          ${saleData?.discount > 0 ? `<tr><td class="py-1">Descuento:</td><td class="text-right text-red-600 font-semibold whitespace-nowrap">-S/. ${(saleData.subtotal * saleData.discount).toFixed(2)}</td></tr>` : ''}
+          ${(saleData?.discountAmt > 0 || saleData?.discount > 0) ? `<tr><td class="py-1">${(saleData?.discount > 0 && saleData?.discount < 1) ? `Descuento (${(saleData.discount * 100).toFixed(0)}%)` : 'Descuento'}:</td><td class="text-right text-red-600 font-semibold whitespace-nowrap">-S/. ${(saleData?.discountAmt || (saleData.subtotal * saleData.discount)).toFixed(2)}</td></tr>` : ''}
           <tr>
             <td class="py-1">IGV (18% ref.):</td>
             <td class="text-right font-semibold text-gray-900">Incluido</td>
@@ -1068,9 +1148,10 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
         id: item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
         _type: item._type,
       })),
-      subtotal: cart.reduce((s, { item, qty }) => s + qty * parseFloat(item.precio || 0), 0),
+      total: saleData.total,
+      subtotal: saleData.subtotal,
       discount: saleData?.discount || 0,
-      total: saleData?.total || 0,
+      discountAmt: saleData?.discountAmt || 0,
       metodoPago: selectedMethod,
       empresa: empresa ? {
         razonSocial: empresa.razonSocial,

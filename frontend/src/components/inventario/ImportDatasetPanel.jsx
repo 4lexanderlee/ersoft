@@ -7,10 +7,10 @@ import { FaTimes, FaUpload, FaSearch, FaExclamationTriangle, FaCheckCircle } fro
 
 /**
  * Required columns and their indices (0-based):
- * 0: Lote | 1: Nombre | 2: Tipo | 3: Precio | 4: Cod Barras | 5: Dsct
- * 6: Vig Inicio | 7: Vig Fin | 8: categoría | 9: Imagen url | 10: Stock | 11: Descripción
+ * 0: Lote | 1: Nombre | 2: Tipo | 3: Precio | 4: Costo | 5: Cod Barras | 6: Dsct
+ * 7: Tipo Dsct | 8: Valor Dsct | 9: Vig Inicio | 10: Vig Fin | 11: categoría | 12: Imagen url | 13: Stock | 14: Descripción
  */
-const COLUMNS = ['Lote', 'Nombre', 'Tipo', 'Precio', 'Cod Barras', 'Dsct', 'Vig Inicio', 'Vig Fin', 'categoría', 'Imagen url', 'Stock', 'Descripción'];
+const COLUMNS = ['Lote', 'Nombre', 'Tipo', 'Precio', 'Costo', 'Cod Barras', 'Dsct', 'Tipo Dsct', 'Valor Dsct', 'Vig Inicio', 'Vig Fin', 'categoría', 'Imagen url', 'Stock', 'Descripción'];
 const REQUIRED_FOR_PRODUCTO = ['Nombre', 'Tipo', 'Precio', 'Lote', 'Stock'];
 const REQUIRED_FOR_SERVICIO = ['Nombre', 'Tipo', 'Precio'];
 
@@ -82,6 +82,9 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
   if (!safeStr(row['Precio']) || isNaN(parseFloat(safeStr(row['Precio']))) || parseFloat(safeStr(row['Precio'])) < 0) {
     errs.push(`Fila ${rowIndex}: Precio inválido`);
   }
+  if (!safeStr(row['Costo']) || isNaN(parseFloat(safeStr(row['Costo']))) || parseFloat(safeStr(row['Costo'])) < 0) {
+    errs.push(`Fila ${rowIndex}: Costo inválido (Deje en 0 mínimo)`);
+  }
 
   if (tipo === 'Producto') {
     if (!safeStr(row['Lote'])) errs.push(`Fila ${rowIndex}: Lote es obligatorio para Productos`);
@@ -102,6 +105,17 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
       errs.push(`Fila ${rowIndex}: Código de barras "${barcode}" debe tener mínimo 6 dígitos numéricos`);
     } else if (existingBarcodes.has(barcode)) {
       errs.push(`Fila ${rowIndex}: Código de barras "${barcode}" ya está en uso`);
+    }
+  }
+
+  const dsct = safeStr(row['Dsct']);
+  const valorDsct = safeStr(row['Valor Dsct']);
+  if (valorDsct !== '') {
+    const val = parseInt(valorDsct);
+    if (isNaN(val) || val <= 0) {
+      errs.push(`Fila ${rowIndex}: Valor Dsct debe ser un número entero positivo`);
+    } else if (!dsct) {
+      errs.push(`Fila ${rowIndex}: Dsct es obligatorio si se indica un Valor Dsct`);
     }
   }
 
@@ -223,7 +237,10 @@ const ImportDatasetPanel = ({ onClose }) => {
         tipo,
         nombre: safeStr(row['Nombre']),
         precio: parseFloat(safeStr(row['Precio'])) || 0,
+        costo: parseFloat(safeStr(row['Costo'])) || 0,
         codigoDsct: safeStr(row['Dsct']) || '',
+        tipoDsct: safeStr(row['Tipo Dsct']) || 'PEN',
+        valorDsct: safeStr(row['Valor Dsct']) ? parseInt(safeStr(row['Valor Dsct'])) : null,
         codigoBarras: safeStr(row['Cod Barras']) || null,
         vigenciaDesde: parseExcelDate(row['Vig Inicio']),
         vigenciaHasta: parseExcelDate(row['Vig Fin']),

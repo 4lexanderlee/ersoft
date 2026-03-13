@@ -29,6 +29,9 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
         nombre: editItem.nombre || '',
         tipo: 'Producto',
         precio: editItem.precio || '',
+        costo: editItem.costo || '0',
+        tipoDsct: editItem.tipoDsct || 'PEN',
+        valorDsct: editItem.valorDsct || '',
         codigoDsct: editItem.codigoDsct || '',
         codigoBarras: editItem.codigoBarras || '',
         vigenciaDesde: editItem.vigenciaDesde || '',
@@ -40,7 +43,9 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
         categorias: normCats(editItem),
       }
     : {
-        nombre: '', tipo: 'Producto', precio: '', codigoDsct: '',
+        nombre: '', tipo: 'Producto', precio: '', costo: '0',
+        tipoDsct: 'PEN', valorDsct: '',
+        codigoDsct: '',
         codigoBarras: '',
         vigenciaDesde: '', vigenciaHasta: '',
         imagen: null, stock: '1', descripcion: '',
@@ -99,8 +104,15 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
     const errs = {};
     if (!form.nombre.trim()) errs.nombre = 'El nombre es obligatorio';
     if (!form.precio || isNaN(parseFloat(form.precio))) errs.precio = 'Precio inválido';
+    if (!form.costo || isNaN(parseFloat(form.costo))) errs.costo = 'Costo inválido';
     if (form.categorias.length === 0) errs.categorias = 'Selecciona al menos una categoría';
     if (!editItem && !form.loteId) errs.loteId = 'Selecciona un lote';
+
+    if (form.valorDsct && parseInt(form.valorDsct) > 0) {
+      if (!form.codigoDsct.trim()) errs.codigoDsct = 'Código obligatorio si hay descuento';
+      const val = parseInt(form.valorDsct);
+      if (isNaN(val) || val <= 0) errs.valorDsct = 'Debe ser un entero positivo';
+    }
 
     // Barcode validation
     if (form.codigoBarras.trim() !== '') {
@@ -131,6 +143,10 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
     const stockNum = parseInt(form.stock);
     const payload = {
       ...form,
+      precio: parseFloat(form.precio),
+      costo: parseFloat(form.costo) || 0,
+      tipoDsct: form.tipoDsct,
+      valorDsct: form.valorDsct ? parseInt(form.valorDsct) : null,
       stock: stockNum,
       codigoBarras: form.codigoBarras.trim() || null,
       // Remove legacy field if present
@@ -204,6 +220,17 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
             {errors.precio && <p className="text-red-400 text-xs mt-1">{errors.precio}</p>}
           </div>
 
+          {/* Costo */}
+          <div>
+            <label className={`text-xs font-semibold uppercase ${labelCls}`}>Costo / Compra <span className="text-red-500">*</span></label>
+            <div className="relative mt-1">
+              <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>S/.</span>
+              <input name="costo" type="number" step="0.01" value={form.costo} onChange={handleChange} placeholder="0.00"
+                className={`w-full pl-9 pr-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.costo ? 'border-red-500' : ''}`} />
+            </div>
+            {errors.costo && <p className="text-red-400 text-xs mt-1">{errors.costo}</p>}
+          </div>
+
           {/* Código de Barras (optional) */}
           <div>
             <label className={`text-xs font-semibold uppercase ${labelCls}`}>
@@ -225,11 +252,31 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
             {errors.codigoBarras && <p className="text-red-400 text-xs mt-1">{errors.codigoBarras}</p>}
           </div>
 
+          {/* Valor de Descuento (opcional) */}
+          <div>
+            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
+              Descuento <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>(opcional)</span>
+            </label>
+            <div className="flex gap-2 mt-1">
+              <select name="tipoDsct" value={form.tipoDsct} onChange={handleChange}
+                className={`w-20 px-2 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`}>
+                <option value="PEN">PEN</option>
+                <option value="%">%</option>
+              </select>
+              <input name="valorDsct" type="number" min="1" step="1" value={form.valorDsct} onChange={handleChange} placeholder="Monto (entero positivo)"
+                className={`flex-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.valorDsct ? 'border-red-500' : ''}`} />
+            </div>
+            {errors.valorDsct && <p className="text-red-400 text-xs mt-1">{errors.valorDsct}</p>}
+          </div>
+
           {/* Código DSCT */}
           <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>Código DSCT</label>
+            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
+              Código DSCT {(form.valorDsct && parseInt(form.valorDsct) > 0) && <span className="text-red-500">*</span>}
+            </label>
             <input name="codigoDsct" value={form.codigoDsct} onChange={handleChange} placeholder="ej. PROMO25"
-              className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`} />
+              className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.codigoDsct ? 'border-red-500' : ''}`} />
+            {errors.codigoDsct && <p className="text-red-400 text-xs mt-1">{errors.codigoDsct}</p>}
           </div>
 
           {/* Vigencia */}

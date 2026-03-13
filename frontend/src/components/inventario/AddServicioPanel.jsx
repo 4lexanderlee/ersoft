@@ -26,6 +26,8 @@ const AddServicioPanel = ({ onClose, editItem = null, onSaved }) => {
         nombre: editItem.nombre || '',
         tipo: 'Servicio',
         precio: editItem.precio || '',
+        tipoDsct: editItem.tipoDsct || 'PEN',
+        valorDsct: editItem.valorDsct || '',
         codigoDsct: editItem.codigoDsct || '',
         vigenciaDesde: editItem.vigenciaDesde || '',
         vigenciaHasta: editItem.vigenciaHasta || '',
@@ -34,7 +36,9 @@ const AddServicioPanel = ({ onClose, editItem = null, onSaved }) => {
         categorias: normCats(editItem),
       }
     : {
-        nombre: '', tipo: 'Servicio', precio: '', codigoDsct: '',
+        nombre: '', tipo: 'Servicio', precio: '', 
+        tipoDsct: 'PEN', valorDsct: '',
+        codigoDsct: '',
         vigenciaDesde: '', vigenciaHasta: '',
         imagen: null, descripcion: '', categorias: [],
       }
@@ -76,6 +80,13 @@ const AddServicioPanel = ({ onClose, editItem = null, onSaved }) => {
     const errs = {};
     if (!form.nombre.trim()) errs.nombre = 'El nombre es obligatorio';
     if (!form.precio || isNaN(parseFloat(form.precio))) errs.precio = 'Precio inválido';
+    
+    if (form.valorDsct && parseInt(form.valorDsct) > 0) {
+      if (!form.codigoDsct.trim()) errs.codigoDsct = 'Código obligatorio si hay descuento';
+      const val = parseInt(form.valorDsct);
+      if (isNaN(val) || val <= 0) errs.valorDsct = 'Debe ser un entero positivo';
+    }
+    
     return errs;
   };
 
@@ -92,6 +103,9 @@ const AddServicioPanel = ({ onClose, editItem = null, onSaved }) => {
     if (!r.success) { setPwdError('Contraseña incorrecta'); return; }
     const payload = {
       ...form,
+      precio: parseFloat(form.precio) || 0,
+      tipoDsct: form.tipoDsct,
+      valorDsct: form.valorDsct ? parseInt(form.valorDsct) : null,
       // Remove legacy field if present
       categoria: undefined,
     };
@@ -142,11 +156,31 @@ const AddServicioPanel = ({ onClose, editItem = null, onSaved }) => {
             {errors.precio && <p className="text-red-400 text-xs mt-1">{errors.precio}</p>}
           </div>
 
+          {/* Valor de Descuento (opcional) */}
+          <div>
+            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
+              Descuento <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>(opcional)</span>
+            </label>
+            <div className="flex gap-2 mt-1">
+              <select name="tipoDsct" value={form.tipoDsct} onChange={handleChange}
+                className={`w-20 px-2 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`}>
+                <option value="PEN">PEN</option>
+                <option value="%">%</option>
+              </select>
+              <input name="valorDsct" type="number" min="1" step="1" value={form.valorDsct} onChange={handleChange} placeholder="Monto (entero positivo)"
+                className={`flex-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.valorDsct ? 'border-red-500' : ''}`} />
+            </div>
+            {errors.valorDsct && <p className="text-red-400 text-xs mt-1">{errors.valorDsct}</p>}
+          </div>
+
           {/* Código DSCT */}
           <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>Código DSCT</label>
+            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
+              Código DSCT {(form.valorDsct && parseInt(form.valorDsct) > 0) && <span className="text-red-500">*</span>}
+            </label>
             <input name="codigoDsct" value={form.codigoDsct} onChange={handleChange} placeholder="ej. PROMO25"
-              className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`} />
+              className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.codigoDsct ? 'border-red-500' : ''}`} />
+            {errors.codigoDsct && <p className="text-red-400 text-xs mt-1">{errors.codigoDsct}</p>}
           </div>
 
           {/* Vigencia */}
