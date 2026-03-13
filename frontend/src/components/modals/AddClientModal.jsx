@@ -32,9 +32,10 @@ const PillInput = ({ inputCls, hasError, ...props }) => (
 /* ─────────────────────────────────────────────────────────────────
    Main Modal
 ───────────────────────────────────────────────────────────────── */
-const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNumber = '', onClientAdded }) => {
+const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNumber = '', onClientAdded, isEditing = false, initialClientData = null }) => {
   const { theme } = useTheme();
-  const isRUC = initialDocType === 'RUC';
+  // In edit mode, determine if it's RUC from the existing data.
+  const isRUC = isEditing ? initialClientData?.docType === 'RUC' : initialDocType === 'RUC';
 
   /* ── Person (DNI / CE) state ── */
   const [nombre,    setNombre]    = useState('');
@@ -53,19 +54,35 @@ const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNum
   /* ── Errors ── */
   const [errors,    setErrors]    = useState({});
 
-  // Pre-fill document number from search bar when modal opens
+  // Pre-fill fields when modal opens
   useEffect(() => {
     if (isOpen) {
       setErrors({});
-      if (isRUC) {
-        setRuc(initialDocNumber);
-        setRazonSocial(''); setCorreoRuc(''); setTelefonoRuc(''); setDireccionFiscal('');
+      if (isEditing && initialClientData) {
+        if (initialClientData.docType === 'RUC') {
+          setRuc(initialClientData.docNumber || '');
+          setRazonSocial(initialClientData.name || '');
+          setCorreoRuc(initialClientData.correo || '');
+          setTelefonoRuc(initialClientData.telefono || '');
+          setDireccionFiscal(initialClientData.direccionFiscal || '');
+        } else {
+          setDocumento(initialClientData.docNumber || '');
+          setNombre(initialClientData.name || '');
+          setApellidos(initialClientData.surname || '');
+          setTelefono(initialClientData.telefono || '');
+          setCorreo(initialClientData.correo || '');
+        }
       } else {
-        setDocumento(initialDocNumber);
-        setNombre(''); setApellidos(''); setTelefono(''); setCorreo('');
+        if (isRUC) {
+          setRuc(initialDocNumber);
+          setRazonSocial(''); setCorreoRuc(''); setTelefonoRuc(''); setDireccionFiscal('');
+        } else {
+          setDocumento(initialDocNumber);
+          setNombre(''); setApellidos(''); setTelefono(''); setCorreo('');
+        }
       }
     }
-  }, [isOpen, initialDocType, initialDocNumber]);
+  }, [isOpen, initialDocType, initialDocNumber, isEditing, initialClientData, isRUC]);
 
   if (!isOpen) return null;
 
@@ -75,10 +92,16 @@ const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNum
   const clearFieldError = (field) =>
     setErrors(prev => { const n = { ...prev }; delete n[field]; return n; });
 
-  const saveClient = (newClient) => {
+  const saveClient = (clientObj) => {
     const prev = JSON.parse(localStorage.getItem('ersoft_clients') || '[]');
-    localStorage.setItem('ersoft_clients', JSON.stringify([newClient, ...prev]));
-    onClientAdded?.(newClient);
+    let updatedList;
+    if (isEditing && initialClientData) {
+      updatedList = prev.map(c => c.id === initialClientData.id ? { ...c, ...clientObj } : c);
+    } else {
+      updatedList = [clientObj, ...prev];
+    }
+    localStorage.setItem('ersoft_clients', JSON.stringify(updatedList));
+    onClientAdded?.(clientObj);
     onClose();
   };
 
@@ -102,8 +125,8 @@ const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNum
 
     setErrors({});
     saveClient({
-      id: Date.now(),
-      docType: initialDocType,
+      id: isEditing ? initialClientData.id : Date.now(),
+      docType: isEditing ? initialClientData.docType : initialDocType,
       docNumber: documento,
       name: nombre.trim(),
       surname: apellidos.trim(),
@@ -130,7 +153,7 @@ const AddClientModal = ({ isOpen, onClose, initialDocType = 'DNI', initialDocNum
 
     setErrors({});
     saveClient({
-      id: Date.now(),
+      id: isEditing ? initialClientData.id : Date.now(),
       docType: 'RUC',
       docNumber: ruc,
       name: razonSocial.trim(),
