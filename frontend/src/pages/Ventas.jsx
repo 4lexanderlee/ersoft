@@ -29,19 +29,23 @@ const DISCOUNT_CODES = { 'PROMO25': 0.25, 'DESC10': 0.10, 'VIP15': 0.15 };
 ───────────────────────────────────────────────────────────────── */
 const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
-  const { productos, servicios, categorias } = useInventario();
+  const { productos, servicios, categorias, lotes } = useInventario();
 
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [searchText, setSearchText] = useState('');
   const [catFilter, setCatFilter] = useState('');
+  const [loteFilter, setLoteFilter] = useState('');
+
   const [showTypeMenu, setShowTypeMenu] = useState(false);
   const [showCatMenu, setShowCatMenu] = useState(false);
+  const [showLoteMenu, setShowLoteMenu] = useState(false);
   const [showCart, setShowCart] = useState(false);
   // Fix 4: raw input values map (allows empty string while typing)
   const [rawInputs, setRawInputs] = useState({});
 
   const typeRef = useRef(null);
   const catRef = useRef(null);
+  const loteRef = useRef(null);
   const cartRef = useRef(null);
 
   // Close dropdowns on outside click
@@ -49,6 +53,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     const handler = (e) => {
       if (typeRef.current && !typeRef.current.contains(e.target)) setShowTypeMenu(false);
       if (catRef.current && !catRef.current.contains(e.target)) setShowCatMenu(false);
+      if (loteRef.current && !loteRef.current.contains(e.target)) setShowLoteMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
@@ -72,7 +77,8 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     // Support multi-category array
     const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
     const matchCat = !catFilter || itemCats.includes(catFilter);
-    return matchType && matchSearch && matchCat;
+    const matchLote = !loteFilter || (item._type === 'Producto' && Number(item.loteId) === Number(loteFilter));
+    return matchType && matchSearch && matchCat && matchLote;
   });
 
   const allCats = [...new Set([...categorias.productos, ...categorias.servicios])];
@@ -185,6 +191,30 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                 </div>
               )}
             </div>
+
+            {/* Lote filter */}
+            {typeFilter !== 'Servicios' && lotes && lotes.length > 0 && (
+              <div ref={loteRef} className="relative z-20">
+                <button onClick={() => setShowLoteMenu(!showLoteMenu)}
+                  className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium ${inputCls} hover:border-yellow-500 transition-colors`}>
+                  {loteFilter ? (lotes.find(l => l.id === Number(loteFilter))?.nombre || 'Lote') : 'Todos los Lotes'} {showLoteMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
+                </button>
+                {showLoteMenu && (
+                  <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
+                    <button onClick={() => { setLoteFilter(''); setShowLoteMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!loteFilter ? 'font-bold text-yellow-500' : ''}`}>
+                      Todos los Lotes
+                    </button>
+                    {lotes.map(l => (
+                      <button key={l.id} onClick={() => { setLoteFilter(l.id); setShowLoteMenu(false); }}
+                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${loteFilter === l.id ? 'font-bold text-yellow-500' : ''}`}>
+                        {l.nombre}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Cart icon */}
             <div className="relative">

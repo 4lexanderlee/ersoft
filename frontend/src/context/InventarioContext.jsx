@@ -95,8 +95,16 @@ export const InventarioProvider = ({ children }) => {
   };
 
   const deleteLote = (id) => {
+    // 1. Delete lote
     const updated = lotes.filter(l => l.id !== id);
     setLotes(updated); save('ersoft_lotes', updated);
+
+    // 2. Cascade delete products belonging to this lote
+    setProductos(prev => {
+      const next = prev.filter(p => p.loteId !== id);
+      if (next.length !== prev.length) save('ersoft_productos', next);
+      return next;
+    });
   };
 
   const loteActivo = lotes.find(l => l.estado === 'Activo') || null;
@@ -115,8 +123,38 @@ export const InventarioProvider = ({ children }) => {
     setCategorias(updated); save('ersoft_categorias', updated);
   };
   const removeCategoria = (tipo, nombre) => {
+    // 1. Remove from context
     const updated = { ...categorias, [tipo]: categorias[tipo].filter(c => c !== nombre) };
     setCategorias(updated); save('ersoft_categorias', updated);
+
+    // 2. Remove the category from all products/services
+    if (tipo === 'productos') {
+      setProductos(prev => {
+        const next = prev.map(p => {
+          let cats = p.categorias || (p.categoria ? [p.categoria] : []);
+          if (cats.includes(nombre)) {
+            cats = cats.filter(c => c !== nombre);
+            return { ...p, categorias: cats, categoria: undefined }; // clear legacy field too
+          }
+          return p;
+        });
+        save('ersoft_productos', next);
+        return next;
+      });
+    } else if (tipo === 'servicios') {
+      setServicios(prev => {
+        const next = prev.map(s => {
+          let cats = s.categorias || (s.categoria ? [s.categoria] : []);
+          if (cats.includes(nombre)) {
+            cats = cats.filter(c => c !== nombre);
+            return { ...s, categorias: cats, categoria: undefined };
+          }
+          return s;
+        });
+        save('ersoft_servicios', next);
+        return next;
+      });
+    }
   };
 
   // ── Bulk import ────────────────────────────────────────────────

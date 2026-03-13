@@ -15,7 +15,7 @@ import EmptyState from '../components/ui/EmptyState';
 const Lotes = () => {
   const { theme } = useTheme();
   const { user, login } = useAuth();
-  const { lotes, createLote, cerrarLote, deleteLote } = useInventario();
+  const { lotes, productos, createLote, cerrarLote, deleteLote } = useInventario();
   const navigate = useNavigate();
   const ds = useDS();
 
@@ -152,7 +152,7 @@ const Lotes = () => {
                         <span className={`font-semibold ${ds.text}`}>{lote.fechaCierre}</span>
                       </>}
                       <span className={ds.muted}>Total productos</span>
-                      <span className={`font-semibold ${ds.text}`}>{lote.totalProductos}</span>
+                      <span className={`font-semibold ${ds.text}`}>{productos.filter(p => p.loteId === lote.id).length}</span>
                     </div>
                     {isActive && (
                       <Btn variant="secondary" size="sm"
@@ -200,32 +200,43 @@ const Lotes = () => {
       )}
 
       {/* ── Delete Lote Modal ── */}
-      {deletingLoteId && (
-        <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
-          <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4 text-center">
-            <div>
-              <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-3">
-                <FaTrash size={20} className="text-red-400" />
+      {deletingLoteId && (() => {
+        const productsInLote = productos.filter(p => p.loteId === deletingLoteId);
+        const stockCount = productsInLote.filter(p => p.stock > 0).length;
+        const hasStock = stockCount > 0;
+        return (
+          <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
+            <Card variant="raised" className="w-full max-w-sm flex flex-col gap-4 text-center">
+              <div>
+                <div className="w-12 h-12 rounded-full bg-red-500/20 flex items-center justify-center mx-auto mb-3">
+                  <FaTrash size={20} className="text-red-400" />
+                </div>
+                <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar Lote</h3>
+                {hasStock ? (
+                  <p className="text-sm mt-1 font-semibold text-red-500">
+                    ⚠ Atención: Este lote contiene {stockCount} producto(s) con stock mayor a 0. Al eliminarlo, los productos se borrarán del inventario de forma irreversible.
+                  </p>
+                ) : (
+                  <p className={`text-sm mt-1 ${ds.muted}`}>
+                    ¿Estás seguro de eliminar este lote cerrado? Esta acción <strong>no se puede deshacer</strong>.
+                  </p>
+                )}
               </div>
-              <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar Lote</h3>
-              <p className={`text-sm mt-1 ${ds.muted}`}>
-                ¿Estás seguro de eliminar este lote cerrado? Esta acción <strong>no se puede deshacer</strong>.
-              </p>
-            </div>
-            {deleteError && <p className="text-red-400 text-sm">{deleteError}</p>}
-            <input type="password" value={deletePwd}
-              onChange={e => { setDeletePwd(e.target.value); setDeleteError(''); }}
-              placeholder="Contraseña del master" autoFocus
-              className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
-            <div className="flex gap-3">
-              <Btn variant="secondary" fullWidth onClick={() => { setDeletingLoteId(null); setDeletePwd(''); setDeleteError(''); }}>
-                Cancelar
-              </Btn>
-              <Btn variant="danger" fullWidth onClick={handleDelete}>Eliminar</Btn>
-            </div>
-          </Card>
-        </div>
-      )}
+              {deleteError && <p className="text-red-400 text-sm">{deleteError}</p>}
+              <input type="password" value={deletePwd}
+                onChange={e => { setDeletePwd(e.target.value); setDeleteError(''); }}
+                placeholder="Contraseña del master" autoFocus
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
+              <div className="flex gap-3">
+                <Btn variant="secondary" fullWidth onClick={() => { setDeletingLoteId(null); setDeletePwd(''); setDeleteError(''); }}>
+                  Cancelar
+                </Btn>
+                <Btn variant="danger" fullWidth onClick={handleDelete}>Eliminar</Btn>
+              </div>
+            </Card>
+          </div>
+        );
+      })()}
     </div>
   );
 };

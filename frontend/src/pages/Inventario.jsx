@@ -169,7 +169,7 @@ const ServicioCard = ({ item, onEdit, onDelete, theme }) => {
 };
 
 /* ─── Filter Panel ──────────────────────────────────────────────── */
-const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats, categorias, theme }) => {
+const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats, categorias, theme, activeTab, lotes, selectedLote, setSelectedLote }) => {
   const panelRef = useRef(null);
   useEffect(() => {
     const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) onClose(); };
@@ -218,6 +218,21 @@ const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats
           ))}
         </div>
       )}
+      {activeTab === 'productos' && lotes && lotes.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <label className="flex items-center justify-between font-semibold text-sm mb-2">
+            Lote
+          </label>
+          <select value={selectedLote} onChange={(e) => setSelectedLote(Number(e.target.value) || '')}
+            className={`w-full text-xs px-2 py-1.5 border rounded-lg ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} outline-none`}
+          >
+            <option value="">Todos los lotes</option>
+            {lotes.map(l => (
+              <option key={l.id} value={l.id}>{l.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
     </div>
   );
 };
@@ -227,7 +242,7 @@ const Inventario = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const ds = useDS();
-  const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias } = useInventario();
+  const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias, lotes } = useInventario();
 
   const [activeTab, setActiveTab] = useState('productos');
   const [panel, setPanel] = useState(null);
@@ -237,6 +252,7 @@ const Inventario = () => {
   const [sortBy, setSortBy] = useState('');
   const [selectedCats, setSelectedCats] = useState([]);
   const [searchText, setSearchText] = useState('');
+  const [selectedLote, setSelectedLote] = useState('');
 
   const [noLoteAlert, setNoLoteAlert] = useState(false);
 
@@ -273,6 +289,9 @@ const Inventario = () => {
         const cats = getCats(i);
         return cats.some(c => selectedCats.includes(c));
       });
+    }
+    if (selectedLote && activeTab === 'productos') {
+      arr = arr.filter(i => i.loteId === selectedLote);
     }
     if (sortBy === 'az') arr.sort((a, b) => a.nombre.localeCompare(b.nombre));
     if (sortBy === 'za') arr.sort((a, b) => b.nombre.localeCompare(a.nombre));
@@ -340,6 +359,10 @@ const Inventario = () => {
                   selectedCats={selectedCats} setSelectedCats={setSelectedCats}
                   categorias={activeTab === 'productos' ? allProductCats : allServicioCats}
                   theme={theme}
+                  activeTab={activeTab}
+                  lotes={lotes}
+                  selectedLote={selectedLote}
+                  setSelectedLote={setSelectedLote}
                 />
               )}
             </div>
