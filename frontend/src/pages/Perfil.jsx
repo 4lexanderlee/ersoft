@@ -120,7 +120,7 @@ const maskPassword = (pw = '') => {
 
 const Perfil = () => {
   const { theme } = useTheme();
-  const { user, verifyMasterPassword, updateCredentials, getCredentials } = useAuth();
+  const { user, verifyMasterPassword, updateCredentials, getCredentials, syncProfileName } = useAuth();
   const navigate = useNavigate();
   const ds = useDS();
 
@@ -179,6 +179,7 @@ const Perfil = () => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       window.dispatchEvent(new Event('storage'));
+      if (syncProfileName) syncProfileName(updated.name.trim());
     } catch (_) {}
 
     // Save credentials if they changed

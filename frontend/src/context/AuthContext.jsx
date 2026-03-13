@@ -27,9 +27,25 @@ export const AuthProvider = ({ children }) => {
   const login = (username, password) => {
     const creds = loadCredentials();
     if (username === creds.username && password === creds.password) {
+      // Intentar cargar el perfil guardado para obtener el nombre real
+      let profileName = 'Usuario';
+      try {
+        const savedProfile = localStorage.getItem('ersoft_profile');
+        if (savedProfile) {
+          const parsed = JSON.parse(savedProfile);
+          if (parsed.name) {
+            profileName = parsed.name.trim();
+          }
+        } else {
+          profileName = 'Alexander'; // Default master profile
+        }
+      } catch (e) {
+        profileName = 'Alexander';
+      }
+
       const userData = {
         id: 1,
-        name: 'Alexander Lee',
+        name: profileName,
         role: 'Master',
         username: creds.username,
       };
@@ -50,12 +66,22 @@ export const AuthProvider = ({ children }) => {
   const updateCredentials = (newUsername, newPassword) => {
     const creds = { username: newUsername, password: newPassword };
     localStorage.setItem(CREDS_KEY, JSON.stringify(creds));
-    // Also update the active session so the header stays in sync
-    if (user) {
-      const updated = { ...user, username: newUsername };
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, username: newUsername };
       sessionStorage.setItem('ersoft_user', JSON.stringify(updated));
-      setUser(updated);
-    }
+      return updated;
+    });
+  };
+
+  // ── Sync user name from Profile updates ──
+  const syncProfileName = (name) => {
+    setUser(prev => {
+      if (!prev) return prev;
+      const updated = { ...prev, name };
+      sessionStorage.setItem('ersoft_user', JSON.stringify(updated));
+      return updated;
+    });
   };
 
   // ── Expose current credentials (for display in Perfil) ──
@@ -67,7 +93,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, login, logout, verifyMasterPassword, updateCredentials, getCredentials }}>
+    <AuthContext.Provider value={{ user, login, logout, verifyMasterPassword, updateCredentials, syncProfileName, getCredentials }}>
       {children}
     </AuthContext.Provider>
   );

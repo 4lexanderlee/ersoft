@@ -20,7 +20,7 @@ const fmtDate = (iso) => {
 };
 
 const buildTicketHTMLFromRecord = (record) => {
-  const { empresa, items = [], cliente, tipo, fecha, total, subtotal, discount, metodoPago, id } = record;
+  const { empresa, items = [], cliente, tipo, fecha, total, subtotal, discount, metodoPago, id, vendedor } = record;
   const date = fmtDate(fecha);
   const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo' }[metodoPago] || metodoPago || '—';
   const clientName = cliente ? `${cliente.nombre || ''} ${cliente.apellidos || ''}`.trim() : 'Consumidor final';
@@ -64,6 +64,7 @@ const buildTicketHTMLFromRecord = (record) => {
     <p class="center"><strong>N° Comprobante:</strong> ${id}</p>
     <p><strong>Comprobante:</strong> ${tipo}</p>
     <p><strong>Fecha:</strong> ${date}</p>
+    <p><strong>Atención:</strong> ${vendedor || 'Vendedor'}</p>
     <p><strong>Cliente:</strong> ${clientName}</p>
     ${cliente?.documento ? `<p><strong>Doc:</strong> ${cliente.documento}</p>` : ''}
     <p><strong>Pago:</strong> ${payLabel}</p>

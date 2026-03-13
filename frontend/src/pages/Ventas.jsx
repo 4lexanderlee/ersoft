@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useInventario } from '../context/InventarioContext';
 import { useEmpresa } from '../context/EmpresaContext';
+import { useAuth } from '../context/AuthContext';
 import { simulatedClients } from '../data/simulatedClients';
 import {
   FaArrowLeft, FaSearch, FaShoppingCart, FaTrash, FaImage,
@@ -382,6 +383,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
 const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const { user } = useAuth();
   const [docType, setDocType] = useState('DNI');
   const [docNumber, setDocNumber] = useState('');
   const [client, setClient] = useState(null);
@@ -532,7 +534,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
   const handleCotizar = () => {
     const saleData = { client: clientForm, saleType, discount, subtotal, total };
-    const html = buildProformaHTML(empresa, cart, saleData);
+    const html = buildProformaHTML(empresa, cart, saleData, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
   };
@@ -766,7 +768,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 const TIPO_PREFIX = { Ticket: 'TKT', Boleta: 'BOL', Factura: 'FAC', Cotizar: 'COT' };
 const genSaleId = (tipo) => `${TIPO_PREFIX[tipo] || 'TKT'}-${Date.now().toString().slice(-8)}`;
 
-const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
+const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) => {
   const date = new Date().toLocaleString('es-PE');
   const rows = cart.map(({ item, qty }) => `
     <tr>
@@ -809,6 +811,7 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
     <p class="center"><strong>N° Comprobante:</strong> ${saleId || 'N/D'}</p>
     <p><strong>Comprobante:</strong> ${saleData?.saleType || 'Ticket'}</p>
     <p><strong>Fecha:</strong> ${date}</p>
+    <p><strong>Atención:</strong> ${vendedor}</p>
     <p><strong>Cliente:</strong> ${clientName}</p>
     <p><strong>Pago:</strong> ${payLabel}</p>
     <div class="divider"></div>
@@ -829,7 +832,7 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
   </body></html>`;
 };
 
-const buildProformaHTML = (empresa, cart, saleData) => {
+const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
   const date = new Date().toLocaleDateString('es-PE');
   // Optional plus 15 days validity logic could go here
   const due = new Date(Date.now() + 15 * 86400000).toLocaleDateString('es-PE'); 
@@ -984,6 +987,10 @@ const buildProformaHTML = (empresa, cart, saleData) => {
       <div class="w-64 border border-gray-900 p-3 rounded-md">
         <table class="w-full text-[10px] text-gray-700">
           <tr>
+            <td class="py-1">Atención:</td>
+            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">${vendedor}</td>
+          </tr>
+          <tr>
             <td class="py-1">Subtotal:</td>
             <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${subTotalStr}</td>
           </tr>
@@ -1032,6 +1039,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
   const { updateProducto, productos, bulkUpdateStock } = useInventario();
   const { empresa } = useEmpresa();
+  const { user } = useAuth();
 
   const [selectedMethod, setSelectedMethod] = useState(null);
   const [showQrModal, setShowQrModal]   = useState(false);
@@ -1054,6 +1062,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       fecha: new Date().toISOString(),
       estado: 'Activo',
       cliente: saleData?.client || null,
+      vendedor: user?.name || user?.username || 'Vendedor',
       items: cart.map(({ item, qty }) => ({
         id: item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
         _type: item._type,
@@ -1093,7 +1102,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const openTicket = () => {
     saveComprobante(); // persist before anything else
     const saleId = getSaleId();
-    const html = buildTicketHTML(empresa, cart, saleData, selectedMethod, saleId);
+    const html = buildTicketHTML(empresa, cart, saleData, selectedMethod, saleId, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
     // Deduct stock exactly once when ticket is generated
