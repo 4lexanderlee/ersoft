@@ -222,10 +222,14 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                         {item.nombre}
                       </p>
                       {/* Image */}
-                      <div className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}>
+                      <div 
+                        onClick={() => setQty(item, getQty(item.id) + 1)}
+                        className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-80 transition-opacity ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}
+                        title="Haz clic para agregar rápido 1 unidad"
+                      >
                         {item.imagen
-                          ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain" />
-                          : <FaImage size={32} className={theme === 'dark' ? 'text-gray-600' : 'text-gray-300'} />}
+                          ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain pointer-events-none" />
+                          : <FaImage size={32} className={`pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-300'}`} />}
                       </div>
                       {/* Price */}
                       <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
