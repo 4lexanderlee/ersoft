@@ -364,6 +364,8 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const [discountMsg, setDiscountMsg] = useState('');
   const [addClientMsg, setAddClientMsg] = useState('');
 
+  const { empresa } = useEmpresa();
+
   // Pre-load client passed from Principal (Venta button)
   useEffect(() => {
     const preloaded = location.state?.preloadedClient;
@@ -479,6 +481,32 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   // Always allow saving client if not already selected and name filled
   const canAddClient = !client && (clientForm.nombre.trim() || clientForm.apellidos.trim());
 
+  // Lógica de visibilidad condicional de documentos
+  const isRusRucEmpresa = empresa?.tipoDocumento === 'RUS' || empresa?.tipoDocumento === 'RUC';
+  const isRucEmpresa = empresa?.tipoDocumento === 'RUC';
+  
+  const availableSaleTypes = SALE_TYPES.filter(type => {
+    if (type === 'Cotizar') return true;
+    if (type === 'Ticket') return ['DNI', 'RUS', 'RUC'].includes(docType); // Siempre visible si es uno de estos
+    if (type === 'Boleta') return isRusRucEmpresa;
+    if (type === 'Factura') return isRucEmpresa;
+    return true;
+  });
+
+  // Si el tipo de venta actual ya no está disponible tras cambiar de cliente o de documento, volver a Ticket o Cotizar
+  useEffect(() => {
+    if (!availableSaleTypes.includes(saleType)) {
+      setSaleType(availableSaleTypes[0] || 'Ticket');
+    }
+  }, [docType, availableSaleTypes, saleType]);
+
+  const handleCotizar = () => {
+    const saleData = { client: clientForm, saleType, discount, subtotal, total };
+    const html = buildProformaHTML(empresa, cart, saleData);
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
   return (
     <div className={`flex flex-col flex-1 min-h-0 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
@@ -508,7 +536,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
           {/* Sale type tabs */}
           <div className={`flex rounded-none overflow-hidden border-b-0 ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-[#1a1a1a]'}`}>
-            {SALE_TYPES.map(t => (
+            {availableSaleTypes.map(t => (
               <button key={t} onClick={() => setSaleType(t)}
                 className={`flex-1 py-2.5 text-sm font-semibold transition-colors
                   ${saleType === t ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
@@ -682,10 +710,17 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
               <span className={text}>TOTAL</span>
               <span className={text}>S/. {total.toFixed(2)}</span>
             </div>
-            <button onClick={() => onNext({ client: clientForm, saleType, discount, total })}
-              className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
-              IR A PAGAR <FaArrowLeft className="rotate-180" />
-            </button>
+            {saleType === 'Cotizar' ? (
+              <button onClick={handleCotizar}
+                className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
+                COTIZAR
+              </button>
+            ) : (
+              <button onClick={() => onNext({ client: clientForm, saleType, discount, total, subtotal })}
+                className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
+                IR A PAGAR <FaArrowLeft className="rotate-180" />
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -762,6 +797,199 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId) => {
     </div>
     <script>window.onload = () => { window.print(); }<\/script>
   </body></html>`;
+};
+
+const buildProformaHTML = (empresa, cart, saleData) => {
+  const date = new Date().toLocaleDateString('es-PE');
+  // Optional plus 15 days validity logic could go here
+  const due = new Date(Date.now() + 15 * 86400000).toLocaleDateString('es-PE'); 
+  
+  const clientName = saleData?.client && (saleData.client.nombre || saleData.client.apellidos) 
+    ? `${saleData.client.nombre} ${saleData.client.apellidos}` 
+    : 'Consumidor final';
+  const clientDoc = saleData?.client?.documento || 'No especificado';
+  const clientTel = saleData?.client?.telefono || 'No especificado';
+  const clientEmail = saleData?.client?.correo || 'No especificado';
+  
+  const proformaId = `PROF-${Date.now().toString().slice(-6)}`;
+  const subTotalStr = (saleData.subtotal || 0).toFixed(2);
+  const totalStr = (saleData.total || 0).toFixed(2);
+
+  const qrTag = empresa?.qrPath
+    ? `<img src="${empresa.qrPath}" alt="QR" class="w-32 h-32 object-contain ml-4 rounded-lg shadow-sm border border-gray-100" />`
+    : '';
+
+  return `<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Proforma - ${empresa?.razonSocial || 'ERSOFT'}</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background-color: #f3f4f6; -webkit-print-color-adjust: exact; print-color-adjust: exact; font-family: ui-sans-serif, system-ui, sans-serif; }
+    .doc-container { width: 210mm; min-height: 297mm; background: white; margin: 2rem auto; padding: 25mm 20mm; position: relative; box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25); display: flex; flex-direction: column; }
+    
+    @media print {
+      body { background-color: #ffffff; margin: 0; }
+      .no-print { display: none !important; }
+      .doc-container { margin: 0 !important; box-shadow: none !important; width: 100% !important; min-height: 100vh !important; padding: 0 !important; display: flex; flex-direction: column; }
+      @page { size: A4; margin: 15mm; }
+    }
+    
+    .print-text-control { word-break: break-all; overflow-wrap: break-word; line-height: 1.2; }
+  </style>
+  <script>
+    window.onload = () => {
+      setTimeout(() => {
+        window.print();
+      }, 800);
+    };
+  </script>
+</head>
+<body class="text-gray-900">
+  
+  <div class="doc-container">
+    <!-- Decoración Superior -->
+    <div class="absolute top-0 left-0 w-full h-2 flex print:hidden">
+      <div class="w-1/3 bg-black"></div>
+      <div class="w-2/3 bg-yellow-400"></div>
+    </div>
+
+    <!-- Header -->
+    <div class="flex justify-between items-start pt-2 pb-4">
+      <div class="w-[55%]">
+        <div class="flex items-center gap-3 mb-2">
+          ${empresa?.logoPath ? `<img src="${empresa.logoPath}" alt="Logo" class="h-12 object-contain" />` : ''}
+          <div>
+            <h1 class="text-xl font-black tracking-tight uppercase leading-none">${empresa?.razonSocial || 'ERSOFT'}</h1>
+            <p class="text-[10px] mt-0.5 font-bold text-gray-600 uppercase tracking-wide">${empresa?.tipoDocumento || 'RUC'}: ${empresa?.ruc || '—'}</p>
+          </div>
+        </div>
+        <div class="text-[9px] text-gray-600 flex flex-col gap-1">
+          <div class="flex items-start gap-1.5">
+            <svg class="w-3 h-3 text-yellow-500 shrink-0 mt-0.5" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M5.05 4.05a7 7 0 119.9 9.9L10 18.9l-4.95-4.95a7 7 0 010-9.9zM10 11a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"></path></svg>
+            <span class="leading-tight">${empresa?.direccion || 'Dirección no especificada'}</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3 h-3 text-yellow-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z"></path></svg>
+            <span>${empresa?.telefono || 'Teléfono no especificado'}</span>
+          </div>
+          <div class="flex items-center gap-1.5">
+            <svg class="w-3 h-3 text-yellow-500 shrink-0" fill="currentColor" viewBox="0 0 20 20"><path d="M2.003 5.884L10 9.882l7.997-3.998A2 2 0 0016 4H4a2 2 0 00-1.997 1.884z"></path><path d="M18 8.118l-8 4-8-4V14a2 2 0 002 2h12a2 2 0 002-2V8.118z"></path></svg>
+            <span>${empresa?.email || 'Email no especificado'}</span>
+          </div>
+        </div>
+      </div>
+      
+      <div class="text-right w-[45%] flex flex-col items-end">
+        <h2 class="text-3xl leading-none font-extrabold tracking-tight text-gray-900 uppercase">Proforma</h2>
+        
+        <table class="mt-3 text-[10px] text-left w-56 border-spacing-y-1 border-separate">
+          <tr>
+            <td class="font-bold text-gray-800 pb-0.5">Fecha Emisión:</td>
+            <td class="text-right pb-0.5">${date}</td>
+          </tr>
+          <tr>
+            <td class="font-bold text-gray-800 pb-0.5">Fecha Válidez:</td>
+            <td class="text-right pb-0.5">${due}</td>
+          </tr>
+          <tr>
+            <td class="font-bold text-gray-800 pb-0.5">Moneda:</td>
+            <td class="text-right pb-0.5">Soles (PEN)</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Client Box -->
+    <div class="mt-4">
+      <div class="bg-black text-white px-3 py-1.5 rounded-t-md">
+        <h3 class="font-bold tracking-widest text-[10px] text-yellow-400">DATOS DEL CLIENTE</h3>
+      </div>
+      <div class="border border-gray-900 border-t-0 rounded-b-md px-3 py-2">
+        <table class="w-full text-[10px] table-fixed">
+          <tr>
+            <td class="w-[12%] font-bold text-gray-800 align-top py-0.5">Cliente:</td>
+            <td class="w-[38%] text-gray-800 font-medium align-top pr-2 print-text-control py-0.5">${clientName}</td>
+            <td class="w-[15%] font-bold text-gray-800 align-top py-0.5">Documento:</td>
+            <td class="w-[35%] text-gray-800 align-top break-all py-0.5">${clientDoc}</td>
+          </tr>
+          <tr>
+            <td class="font-bold text-gray-800 align-top py-0.5">Teléfono:</td>
+            <td class="text-gray-800 align-top pr-2 py-0.5 print-text-control">${clientTel}</td>
+            <td class="font-bold text-gray-800 align-top py-0.5">Correo:</td>
+            <td class="text-gray-800 align-top print-text-control py-0.5">${clientEmail}</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- Items Table -->
+    <div class="mt-5 flex-1 w-full">
+      <table class="w-full text-left border-collapse text-[10px] table-auto">
+        <thead class="bg-black text-white border-b-2 border-yellow-400">
+          <tr>
+            <th class="py-1.5 px-2 font-semibold text-center w-[8%]">Item</th>
+            <th class="py-1.5 px-2 font-semibold w-[50%]">Descripción</th>
+            <th class="py-1.5 px-2 font-semibold text-center w-[10%]">Cant.</th>
+            <th class="py-1.5 px-2 font-semibold text-right w-[15%]">V. Unit.</th>
+            <th class="py-1.5 px-2 font-semibold text-right w-[17%] text-yellow-400">V. Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${cart.map(({ item, qty }, idx) => `
+            <tr class="border-b border-gray-200">
+              <td class="py-1.5 px-2 text-center text-gray-600">(${idx + 1})</td>
+              <td class="py-1.5 px-2 text-gray-900 font-medium break-all pr-2">${item.nombre}</td>
+              <td class="py-1.5 px-2 text-center text-gray-900">${qty}</td>
+              <td class="py-1.5 px-2 text-right text-gray-900 whitespace-nowrap">S/. ${parseFloat(item.precio || 0).toFixed(2)}</td>
+              <td class="py-1.5 px-2 text-right text-gray-900 whitespace-nowrap font-medium">S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}</td>
+            </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Totals Area -->
+    <div class="flex justify-end mt-4 break-inside-avoid w-full">
+      <div class="w-64 border border-gray-900 p-3 rounded-md">
+        <table class="w-full text-[10px] text-gray-700">
+          <tr>
+            <td class="py-1">Subtotal:</td>
+            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${subTotalStr}</td>
+          </tr>
+          ${saleData?.discount > 0 ? `<tr><td class="py-1">Descuento:</td><td class="text-right text-red-600 font-semibold whitespace-nowrap">-S/. ${(saleData.subtotal * saleData.discount).toFixed(2)}</td></tr>` : ''}
+          <tr>
+            <td class="py-1">IGV (18% ref.):</td>
+            <td class="text-right font-semibold text-gray-900">Incluido</td>
+          </tr>
+        </table>
+        <div class="border-t-2 border-black mt-2 pt-2 flex justify-between items-center">
+          <span class="font-black text-xs text-gray-900 uppercase tracking-widest">TOTAL</span>
+          <span class="font-black text-[14px] text-green-700 whitespace-nowrap">S/. ${totalStr}</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Footer Area -->
+    <div class="mt-auto pt-6 flex border-t border-gray-900 items-end justify-between break-inside-avoid w-full">
+      <div class="w-[70%] pr-4 text-[8.5px] text-gray-600 text-justify leading-snug">
+        <p class="font-bold text-gray-900 mb-0.5 uppercase tracking-wide">Términos y Condiciones:</p>
+        <p>1. Esta proforma tiene una validez de 15 días calendario a partir de su emisión.</p>
+        <p>2. Precios en Soles (PEN), sujetos a variación sin previo aviso cumplido el plazo.</p>
+        <p>3. Documento exclusivamente informartivo sin validez fiscal. Para facturar confirme su pedido.</p>
+      </div>
+      <div class="w-[30%] flex justify-end">
+        <div class="flex flex-col items-center justify-center p-2 rounded-lg border border-gray-300">
+          <div class="text-[9px] font-bold text-gray-800 mb-1 uppercase tracking-tight">Escanear Pago</div>
+          <div class="flex items-center">
+              ${qrTag || '<div class="text-gray-400 italic text-[9px] py-4 text-center">Sin QR</div>'}
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</body>
+</html>`;
 };
 
 const PAYMENT_METHODS = [
