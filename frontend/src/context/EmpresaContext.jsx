@@ -10,19 +10,17 @@ const DEFAULT_EMPRESA = {
   nombreComercial: 'ER-Soft',
   tipoDocumento: 'RUC',          // 'DNI' | 'RUS' | 'RUC'
   ruc: '20123456789',            // número de documento (se mantiene como 'ruc' para compatibilidad)
-  giroNegocio: 'Desarrollo de Software y Consultoría Empresarial',
-  representanteLegal: 'Alexander Lee Melgarejo',
   logoPath: null,                // base64 del logo PNG de la empresa
   // Ubicación
-  departamento: 'Lima',
-  provincia: 'Lima',
   distrito: 'Miraflores',
+  ciudad: 'Lima',
   direccion: 'Av. Pardo y Aliaga 640, Piso 3',
-  // Contacto
-  telefono: '01 234 5678',
-  celular: '975 262 030',
+  // Contacto y SUNAT
+  telefono: '975262030',         // 9 dígitos numéricos
   email: 'contacto@ersoft.com',
-  web: 'www.ersoft.com',
+  codigoEstablecimiento: '0000',  // código SUNAT 4 dígitos
+  ubigeo: '150122',              // UBIGEO 6 dígitos
+  encargado: 'Alexander Lee',
   // Facturación
   serieFactura: 'F001',
   serieBoleta: 'B001',

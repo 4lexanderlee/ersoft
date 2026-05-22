@@ -1123,6 +1123,15 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const { user } = useAuth();
 
   const [selectedMethod, setSelectedMethod] = useState(null);
+  const [metodosPago, setMetodosPago] = useState(() => {
+    const saved = localStorage.getItem('ersoft_metodos_pago');
+    return saved ? JSON.parse(saved) : [
+      { id: 'cash', activo: true },
+      { id: 'digital', activo: true },
+      { id: 'bank', activo: true },
+      { id: 'pos', activo: true }
+    ];
+  });
   const [showQrModal, setShowQrModal]   = useState(false);
   const [ticketGenerated, setTicketGenerated] = useState(false);
   const [showPhoneModal, setShowPhoneModal]   = useState(false);
@@ -1219,7 +1228,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const RightPanel = () => {
     if (ticketGenerated) return (
       <div className="text-center px-8 space-y-6">
-        <p className={`text-sm italic ${subTx}`}>Pago confirmado, puedes revisar el ticket en TBF</p>
+        <p className={`text-sm italic ${subTx}`}>Pago confirmed, puedes revisar el ticket en TBF</p>
         <div className="text-5xl">😊</div>
         <button onClick={handleFinalizar}
           className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full tracking-widest text-sm">
@@ -1239,6 +1248,22 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
         <div className="text-4xl opacity-40">🙂</div>
       </div>
     );
+
+    // Verify if selected method is active
+    const isSelectedMethodActive = metodosPago.find(m => m.id === selectedMethod)?.activo !== false;
+    if (!isSelectedMethodActive) {
+      return (
+        <div className="text-center px-8 space-y-6 w-full max-w-xs">
+          <div className="bg-red-500/10 border border-red-500/30 text-red-500 rounded-2xl p-5 flex flex-col items-center gap-3">
+            <span className="text-3xl">⚠️</span>
+            <p className="text-sm font-bold uppercase tracking-wider text-red-500">Método de pago inhabilitado</p>
+            <p className="text-xs text-red-400">Método de pago inhabilitado globalmente. Por favor, elija un método de pago activo.</p>
+          </div>
+          <p className={`text-xs ${subTx}`}>Por favor, seleccione un método de pago activo a la izquierda para proceder.</p>
+        </div>
+      );
+    }
+
     // Method selected, ticket not yet generated
     return (
       <div className="text-center px-8 space-y-6">
@@ -1269,30 +1294,42 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       <div className="flex flex-1 overflow-hidden">
         {/* Left: Payment method cards */}
         <div className="flex-1 flex flex-col gap-3 px-8 py-6 max-w-lg">
-          {PAYMENT_METHODS.map(pm => (
-            <button key={pm.key}
-              onClick={() => { setSelectedMethod(pm.key); setTicketGenerated(false); setWarnNoTicket(false); }}
-              className={`flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left
-                ${selectedMethod === pm.key
-                  ? 'border-yellow-500 bg-yellow-500/5'
-                  : cardIdle}`}>
-              <p className={`font-bold italic text-base ${text}`}>{pm.label}</p>
-              {pm.key === 'digital' && (
-                <div className="flex items-center flex-wrap gap-3 mt-3">
-                  {/* Yape */}
-                  <span className="px-2 py-1 rounded-lg font-black text-sm" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
-                  {/* Plin */}
-                  <span className="px-2 py-1 rounded-full font-black text-sm" style={{background:'#00c896',color:'#fff'}}>plin</span>
-                  {/* izipay */}
-                  <span className="px-2 py-1 rounded-sm font-black text-sm" style={{background:'#f04e37',color:'#fff'}}>izipay</span>
+          {PAYMENT_METHODS.map(pm => {
+            const isActive = metodosPago.find(m => m.id === pm.key)?.activo !== false;
+            return (
+              <button key={pm.key}
+                onClick={() => { setSelectedMethod(pm.key); setTicketGenerated(false); setWarnNoTicket(false); }}
+                className={`flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left relative
+                  ${selectedMethod === pm.key
+                    ? (isActive ? 'border-yellow-500 bg-yellow-500/5' : 'border-red-500 bg-red-500/5')
+                    : (isActive ? cardIdle : 'border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-850/40 opacity-60')}
+                `}
+              >
+                <div className="flex justify-between items-center w-full">
+                  <p className={`font-bold italic text-base ${text}`}>{pm.label}</p>
+                  {!isActive && (
+                    <span className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/30 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                      Inhabilitado
+                    </span>
+                  )}
                 </div>
-              )}
-              {pm.key === 'bank'  && <span className="text-2xl mt-3">📱</span>}
-              {pm.key === 'cash'  && <span className="text-2xl mt-3">💰</span>}
-              {pm.key === 'pos'   && <span className="text-2xl mt-3">💳</span>}
-              {pm.sub && <p className={`text-xs mt-1 ${subTx}`}>{pm.sub}</p>}
-            </button>
-          ))}
+                {pm.key === 'digital' && (
+                  <div className="flex items-center flex-wrap gap-3 mt-3">
+                    {/* Yape */}
+                    <span className="px-2 py-1 rounded-lg font-black text-sm" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
+                    {/* Plin */}
+                    <span className="px-2 py-1 rounded-full font-black text-sm" style={{background:'#00c896',color:'#fff'}}>plin</span>
+                    {/* izipay */}
+                    <span className="px-2 py-1 rounded-sm font-black text-sm" style={{background:'#f04e37',color:'#fff'}}>izipay</span>
+                  </div>
+                )}
+                {pm.key === 'bank'  && <span className="text-2xl mt-3">📱</span>}
+                {pm.key === 'cash'  && <span className="text-2xl mt-3">💰</span>}
+                {pm.key === 'pos'   && <span className="text-2xl mt-3">💳</span>}
+                {pm.sub && <p className={`text-xs mt-1 ${subTx}`}>{pm.sub}</p>}
+              </button>
+            );
+          })}
           <button onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
             ← Volver a datos del cliente
           </button>
