@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useInventario } from '../context/InventarioContext';
 import { useDS } from '../hooks/useDS';
@@ -11,6 +10,7 @@ import Btn from '../components/ui/Btn';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
+import RefreshButton from '../components/ui/RefreshButton';
 
 /* ─── helpers ─── */
 const fmtDate = (iso) => {
@@ -133,9 +133,10 @@ const METODOS_PAGO = ['Todos', 'Billetera electrónica', 'Transferencia / CCI', 
 /* ─── TBF Page ─── */
 const TBF = () => {
   const navigate = useNavigate();
-  const { theme } = useTheme();
-  const { login, user } = useAuth();
+  const { verifyPassword, user } = useAuth();
   const { bulkUpdateStock } = useInventario();
+  const isMaster = user?.role === 'Master';
+  const userSucursalId = user?.sucursalId || '1';
   const ds = useDS();
 
   const [comprobantes, setComprobantes] = useState([]);
@@ -166,12 +167,19 @@ const TBF = () => {
     setComprobantes(saved);
   }, []);
 
+  const handleRefresh = () => {
+    const saved = JSON.parse(localStorage.getItem('ersoft_comprobantes') || '[]');
+    setComprobantes(saved);
+  };
+
   const persistComprobantes = (updated) => {
     localStorage.setItem('ersoft_comprobantes', JSON.stringify(updated));
     setComprobantes(updated);
   };
 
-  const filtered = comprobantes.filter(c => {
+  const visibleComprobantes = comprobantes.filter(c => isMaster || String(c.sucursalId || '1') === String(userSucursalId));
+
+  const filtered = visibleComprobantes.filter(c => {
     const f = applied;
     if (f.tipo   && f.tipo !== 'Todos'   && c.tipo !== f.tipo) return false;
     if (f.id     && !c.id.toLowerCase().includes(f.id.toLowerCase())) return false;
@@ -213,8 +221,7 @@ const TBF = () => {
 
   const openBulkDeleteModal = () => { setBulkPwd(''); setBulkPwdError(''); setShowBulkModal(true); };
   const handleBulkDelete = () => {
-    const result = login(user?.username || '', bulkPwd);
-    if (!result?.success) { setBulkPwdError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(bulkPwd)) { setBulkPwdError('Contraseña incorrecta'); return; }
     const updated = comprobantes.filter(c => !selectedIds.includes(c.id));
     persistComprobantes(updated);
     setShowBulkModal(false);
@@ -222,8 +229,7 @@ const TBF = () => {
   };
 
   const handleAnular = () => {
-    const result = login(user?.username || '', anulPwd);
-    if (!result?.success) { setAnulError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(anulPwd)) { setAnulError('Contraseña incorrecta'); return; }
     const record = comprobantes.find(c => c.id === anulTarget);
     if (record && record.estado === 'Activo') {
       // Restore stock for all products in the cancelled ticket atomically
@@ -252,7 +258,7 @@ const TBF = () => {
     <div className={`flex flex-col flex-1 -m-6 ${ds.pageBg}`}>
 
       {/* ── Header ── */}
-      <PageHeader onBack={() => navigate('/principal')} />
+      <PageHeader onBack={() => navigate('/principal')} right={<RefreshButton onRefresh={handleRefresh} />} />
 
       {/* ── Body ── */}
       <div className="flex-1 flex flex-col overflow-y-auto px-6 py-5 gap-4">
@@ -454,13 +460,13 @@ const TBF = () => {
               <h3 className={`font-bold text-base ${ds.text}`}>Anular Comprobante</h3>
             </div>
             <p className={`text-sm ${ds.muted}`}>
-              Anulará el comprobante <strong className={ds.text}>{anulTarget}</strong> y restaurará el stock. Confirma con tu contraseña master.
+              Anulará el comprobante <strong className={ds.text}>{anulTarget}</strong> y restaurará el stock. Confirma con {isMaster ? 'tu contraseña master' : 'tu contraseña'}.
             </p>
             <input
               type="password" value={anulPwd} autoFocus
               onChange={e => { setAnulPwd(e.target.value); setAnulError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleAnular()}
-              placeholder="Contraseña master"
+              placeholder={isMaster ? "Contraseña master" : "Tu contraseña"}
               className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-400/50 ${ds.inputDarkFilled}`}
             />
             {anulError && <p className="text-red-400 text-xs">{anulError}</p>}
@@ -483,13 +489,13 @@ const TBF = () => {
               <h3 className={`font-bold text-base ${ds.text}`}>Eliminar Comprobantes</h3>
             </div>
             <p className={`text-sm ${ds.muted}`}>
-              Se eliminarán permanentemente <strong className={ds.text}>{selectedIds.length} comprobante{selectedIds.length !== 1 ? 's' : ''}</strong>. Esta acción no se puede deshacer. Confirma con tu contraseña master.
+              Se eliminarán permanentemente <strong className={ds.text}>{selectedIds.length} comprobante{selectedIds.length !== 1 ? 's' : ''}</strong>. Esta acción no se puede deshacer. Confirma con {isMaster ? 'tu contraseña master' : 'tu contraseña'}.
             </p>
             <input
               type="password" value={bulkPwd} autoFocus
               onChange={e => { setBulkPwd(e.target.value); setBulkPwdError(''); }}
               onKeyDown={e => e.key === 'Enter' && handleBulkDelete()}
-              placeholder="Contraseña master"
+              placeholder={isMaster ? "Contraseña master" : "Tu contraseña"}
               className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-400/50 ${ds.inputDarkFilled}`}
             />
             {bulkPwdError && <p className="text-red-400 text-xs">{bulkPwdError}</p>}

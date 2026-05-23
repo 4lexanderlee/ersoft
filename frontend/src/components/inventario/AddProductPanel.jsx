@@ -9,12 +9,17 @@ const MAX_CATEGORIAS = 3;
 
 const AddProductPanel = ({ onClose, editItem = null }) => {
   const { theme } = useTheme();
-  const { categorias, addProducto, updateProducto, lotes, incrementLoteCount, isBarcodeInUse } = useInventario();
-  const { login, user } = useAuth();
+  const { categorias, addProducto, updateProducto, lotes, almacenes, incrementLoteCount, isBarcodeInUse } = useInventario();
+  const { verifyPassword, user } = useAuth();
   const imgRef = useRef(null);
 
-  // Active lotes only
-  const activeLotes = lotes.filter(l => l.estado === 'Activo');
+  // Active lotes only - filtered by branch if not Master
+  const activeLotes = lotes.filter(l => {
+    if (l.estado !== 'Activo') return false;
+    if (user.role === 'Master') return true;
+    const alm = almacenes.find(a => String(a.id) === String(l.almacenId));
+    return alm && String(alm.sucursalId) === String(user.sucursalId);
+  });
 
   // Normalize legacy categoria string → array
   const normCats = (item) => {
@@ -30,12 +35,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
         tipo: 'Producto',
         precio: editItem.precio || '',
         costo: editItem.costo || '0',
-        tipoDsct: editItem.tipoDsct || 'PEN',
-        valorDsct: editItem.valorDsct || '',
-        codigoDsct: editItem.codigoDsct || '',
         codigoBarras: editItem.codigoBarras || '',
-        vigenciaDesde: editItem.vigenciaDesde || '',
-        vigenciaHasta: editItem.vigenciaHasta || '',
         imagen: editItem.imagen || null,
         stock: String(editItem.stock ?? 1),
         descripcion: editItem.descripcion || '',
@@ -44,10 +44,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
       }
     : {
         nombre: '', tipo: 'Producto', precio: '', costo: '0',
-        tipoDsct: 'PEN', valorDsct: '',
-        codigoDsct: '',
         codigoBarras: '',
-        vigenciaDesde: '', vigenciaHasta: '',
         imagen: null, stock: '1', descripcion: '',
         loteId: activeLotes[0]?.id || '',
         categorias: [],
@@ -108,12 +105,6 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
     if (form.categorias.length === 0) errs.categorias = 'Selecciona al menos una categoría';
     if (!editItem && !form.loteId) errs.loteId = 'Selecciona un lote';
 
-    if (form.valorDsct && parseInt(form.valorDsct) > 0) {
-      if (!form.codigoDsct.trim()) errs.codigoDsct = 'Código obligatorio si hay descuento';
-      const val = parseInt(form.valorDsct);
-      if (isNaN(val) || val <= 0) errs.valorDsct = 'Debe ser un entero positivo';
-    }
-
     // Barcode validation
     if (form.codigoBarras.trim() !== '') {
       if (!/^\d{6,}$/.test(form.codigoBarras.trim())) {
@@ -138,15 +129,12 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
   };
 
   const handlePwdConfirm = () => {
-    const r = login(user.username, pwd);
-    if (!r.success) { setPwdError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(pwd)) { setPwdError('Contraseña incorrecta'); return; }
     const stockNum = parseInt(form.stock);
     const payload = {
       ...form,
       precio: parseFloat(form.precio),
       costo: parseFloat(form.costo) || 0,
-      tipoDsct: form.tipoDsct,
-      valorDsct: form.valorDsct ? parseInt(form.valorDsct) : null,
       stock: stockNum,
       codigoBarras: form.codigoBarras.trim() || null,
       // Remove legacy field if present
@@ -252,43 +240,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
             {errors.codigoBarras && <p className="text-red-400 text-xs mt-1">{errors.codigoBarras}</p>}
           </div>
 
-          {/* Valor de Descuento (opcional) */}
-          <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
-              Descuento <span className={`text-xs font-normal ml-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>(opcional)</span>
-            </label>
-            <div className="flex gap-2 mt-1">
-              <select name="tipoDsct" value={form.tipoDsct} onChange={handleChange}
-                className={`w-20 px-2 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`}>
-                <option value="PEN">PEN</option>
-                <option value="%">%</option>
-              </select>
-              <input name="valorDsct" type="number" min="1" step="1" value={form.valorDsct} onChange={handleChange} placeholder="Monto (entero positivo)"
-                className={`flex-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.valorDsct ? 'border-red-500' : ''}`} />
-            </div>
-            {errors.valorDsct && <p className="text-red-400 text-xs mt-1">{errors.valorDsct}</p>}
-          </div>
 
-          {/* Código DSCT */}
-          <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>
-              Código DSCT {(form.valorDsct && parseInt(form.valorDsct) > 0) && <span className="text-red-500">*</span>}
-            </label>
-            <input name="codigoDsct" value={form.codigoDsct} onChange={handleChange} placeholder="ej. PROMO25"
-              className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.codigoDsct ? 'border-red-500' : ''}`} />
-            {errors.codigoDsct && <p className="text-red-400 text-xs mt-1">{errors.codigoDsct}</p>}
-          </div>
-
-          {/* Vigencia */}
-          <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>Vigencia</label>
-            <div className="flex gap-3 mt-1">
-              <input type="date" name="vigenciaDesde" value={form.vigenciaDesde} onChange={handleChange}
-                className={`flex-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`} />
-              <input type="date" name="vigenciaHasta" value={form.vigenciaHasta} onChange={handleChange}
-                className={`flex-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`} />
-            </div>
-          </div>
 
           {/* Categorías — multi-select chips (max 3) */}
           <div>
@@ -385,7 +337,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
             <h3 className="font-bold text-center">Confirmar con contraseña</h3>
             {pwdError && <p className="text-red-400 text-sm text-center">{pwdError}</p>}
             <input type="password" value={pwd} onChange={e => { setPwd(e.target.value); setPwdError(''); }}
-              placeholder="Contraseña del master" autoFocus
+              placeholder={user.role === 'Master' ? 'Contraseña del master' : 'Tu contraseña'} autoFocus
               className={`w-full px-4 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 ${inputCls}`} />
             <div className="flex gap-3">
               <button onClick={() => { setShowPwdModal(false); setPwd(''); setPwdError(''); }}

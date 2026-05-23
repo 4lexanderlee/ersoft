@@ -74,12 +74,18 @@ const validators = {
     if (v && v.trim().length > 40) return 'Máximo 40 caracteres.';
     return '';
   },
+  igv: v => {
+    if (v === undefined || v === null || String(v).trim() === '') return 'El IGV es obligatorio.';
+    const num = parseFloat(v);
+    if (isNaN(num) || num < 0 || num > 100) return 'El IGV debe ser un número entre 0 y 100.';
+    return '';
+  },
 };
 
 const REQUIRED_FIELDS = [
   'razonSocial','nombreComercial','tipoDocumento','ruc',
   'distrito','ciudad','direccion',
-  'telefono','codigoEstablecimiento','ubigeo','email',
+  'telefono','codigoEstablecimiento','ubigeo','email','igv'
 ];
 
 function validateAll(form) {
@@ -478,6 +484,7 @@ const DatosUbi = () => {
             <Field {...fp('razonSocial', 'Razón Social', { maxLength: 60 })} />
             <Field {...fp('nombreComercial', 'Nombre Comercial', { maxLength: 60 })} />
             <DocField form={form} editing={editing} onChange={handleChange} errors={errors} theme={theme} />
+            <Field {...fp('igv', 'IGV (%)', { type: 'number', step: '0.1', min: '0', max: '100' })} />
           </div>
         </div>
 

@@ -4,7 +4,7 @@ import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useDS } from '../../hooks/useDS';
 import {
-  FaUserShield, FaSave, FaTimes, FaLock, FaCheck, FaShieldAlt, FaPlus, FaTrash
+  FaUserShield, FaSave, FaTimes, FaLock, FaCheck, FaShieldAlt, FaPlus, FaTrash, FaUnlock
 } from 'react-icons/fa';
 import PageHeader from '../../components/ui/PageHeader';
 
@@ -16,6 +16,10 @@ const DEFAULT_ROLES_PERMISOS = {
     tbf: { ver: true, crear: true, editar: true, eliminar: true },
     graficos: { ver: true, crear: true, editar: true, eliminar: true },
     empresa: { ver: true, crear: true, editar: true, eliminar: true },
+    promociones: { ver: true, crear: true, editar: true, eliminar: true },
+    caja: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_global: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_sucursal: { ver: true, crear: true, editar: true, eliminar: true },
   },
   Vendedor: {
     ventas: { ver: true, crear: true, editar: false, eliminar: false },
@@ -24,6 +28,10 @@ const DEFAULT_ROLES_PERMISOS = {
     tbf: { ver: true, crear: true, editar: false, eliminar: false },
     graficos: { ver: false, crear: false, editar: false, eliminar: false },
     empresa: { ver: false, crear: false, editar: false, eliminar: false },
+    promociones: { ver: true, crear: false, editar: false, eliminar: false },
+    caja: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
+    calendario_sucursal: { ver: true, crear: true, editar: true, eliminar: false },
   },
   Cajero: {
     ventas: { ver: true, crear: true, editar: false, eliminar: false },
@@ -32,6 +40,10 @@ const DEFAULT_ROLES_PERMISOS = {
     tbf: { ver: true, crear: true, editar: true, eliminar: false },
     graficos: { ver: true, crear: false, editar: false, eliminar: false },
     empresa: { ver: false, crear: false, editar: false, eliminar: false },
+    promociones: { ver: true, crear: false, editar: false, eliminar: false },
+    caja: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
+    calendario_sucursal: { ver: true, crear: false, editar: false, eliminar: false },
   },
   Almacenero: {
     ventas: { ver: false, crear: false, editar: false, eliminar: false },
@@ -40,6 +52,10 @@ const DEFAULT_ROLES_PERMISOS = {
     tbf: { ver: false, crear: false, editar: false, eliminar: false },
     graficos: { ver: false, crear: false, editar: false, eliminar: false },
     empresa: { ver: false, crear: false, editar: false, eliminar: false },
+    promociones: { ver: false, crear: false, editar: false, eliminar: false },
+    caja: { ver: false, crear: false, editar: false, eliminar: false },
+    calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
+    calendario_sucursal: { ver: true, crear: false, editar: false, eliminar: false },
   },
 };
 
@@ -50,6 +66,10 @@ const MODULE_LABELS = {
   tbf: 'TBF (Tickets, Boletas y Facturas)',
   graficos: 'Módulo de Reportes / Gráficos',
   empresa: 'Configuración de Empresa / Roles',
+  promociones: 'Promociones / Descuentos',
+  caja: 'Gestión de Caja / Turnos',
+  calendario_global: '📅 Calendario Global (Eventos Empresa)',
+  calendario_sucursal: '🏬 Calendario de Sucursal',
 };
 
 const PERMISSION_LABELS = {
@@ -264,11 +284,28 @@ const CreateRoleModal = ({ isOpen, onClose, onCreate, existingRoles, theme, ds }
 const RolesPer = () => {
   const ds = useDS();
   const { theme } = useTheme();
+  const { user } = useAuth();
   const navigate = useNavigate();
+  const isMaster = user?.role === 'Master';
+
+  const loadWithDefaults = (saved) => {
+    // Merge saved perms with defaults so every role always has all module keys
+    const base = saved || DEFAULT_ROLES_PERMISOS;
+    const merged = {};
+    Object.keys(base).forEach(role => {
+      const defaultPerms = DEFAULT_ROLES_PERMISOS[role] || {};
+      const savedPerms   = base[role] || {};
+      merged[role] = {};
+      Object.keys(MODULE_LABELS).forEach(mk => {
+        merged[role][mk] = { ...{ ver: false, crear: false, editar: false, eliminar: false }, ...defaultPerms[mk], ...savedPerms[mk] };
+      });
+    });
+    return merged;
+  };
 
   const [rolesPermisos, setRolesPermisos] = useState(() => {
     const saved = localStorage.getItem('ersoft_roles_permisos');
-    return saved ? JSON.parse(saved) : DEFAULT_ROLES_PERMISOS;
+    return loadWithDefaults(saved ? JSON.parse(saved) : null);
   });
 
   const [selectedRole, setSelectedRole] = useState('Administrador');
@@ -285,17 +322,18 @@ const RolesPer = () => {
   }, [rolesPermisos]);
 
   const handleToggle = (moduleKey, permKey) => {
-    // Admin cannot be edited (has full access by definition)
-    if (selectedRole === 'Administrador') return;
+    // Only Master can edit the Administrador role
+    if (selectedRole === 'Administrador' && !isMaster) return;
 
     setTempPermisos(prev => {
+      const currentModulePerms = prev[selectedRole]?.[moduleKey] || { ver: false, crear: false, editar: false, eliminar: false };
       const updated = {
         ...prev,
         [selectedRole]: {
           ...prev[selectedRole],
           [moduleKey]: {
-            ...prev[selectedRole][moduleKey],
-            [permKey]: !prev[selectedRole][moduleKey][permKey],
+            ...currentModulePerms,
+            [permKey]: !currentModulePerms[permKey],
           }
         }
       };
@@ -354,6 +392,8 @@ const RolesPer = () => {
     setPendingAction(null);
   };
 
+  // Administrador is only fully locked for non-Master users
+  const isAdminLocked = selectedRole === 'Administrador' && !isMaster;
   const isDefaultRole = ['Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(selectedRole);
 
   return (
@@ -432,8 +472,10 @@ const RolesPer = () => {
               <div>
                 <h3 className={`text-lg font-bold ${ds.text}`}>Permisos para {selectedRole}</h3>
                 <p className={`text-xs ${ds.muted}`}>
-                  {selectedRole === 'Administrador'
-                    ? 'El rol de Administrador tiene acceso total a todos los módulos y no puede ser modificado.'
+                  {isAdminLocked
+                    ? 'El rol de Administrador tiene acceso total. Solo el Master puede modificar sus permisos.'
+                    : selectedRole === 'Administrador' && isMaster
+                    ? 'Como Master puedes ajustar los permisos del Administrador. Los cambios requieren confirmación de contraseña.'
                     : 'Habilita o deshabilita los permisos correspondientes de acceso a cada módulo.'}
                 </p>
               </div>
@@ -447,9 +489,14 @@ const RolesPer = () => {
                     <FaTrash size={10} /> Eliminar Rol
                   </button>
                 )}
-                {selectedRole === 'Administrador' && (
+                {isAdminLocked && (
                   <span className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-yellow-500/10 text-yellow-600 dark:text-yellow-400">
-                    <FaLock size={10} /> Solo Lectura
+                    <FaLock size={10} /> Solo Master
+                  </span>
+                )}
+                {selectedRole === 'Administrador' && isMaster && (
+                  <span className="flex items-center gap-1.5 px-3 py-1 text-xs font-semibold rounded-full bg-emerald-500/10 text-emerald-500 border border-emerald-500/20">
+                    <FaUnlock size={10} /> Editable (Master)
                   </span>
                 )}
               </div>
@@ -469,13 +516,13 @@ const RolesPer = () => {
                   <div className="grid grid-cols-2 md:flex items-center gap-4 md:gap-6">
                     {Object.keys(PERMISSION_LABELS).map(permKey => {
                       const isChecked = tempPermisos[selectedRole]?.[moduleKey]?.[permKey] ?? false;
-                      const isDisabled = selectedRole === 'Administrador';
+                      const isDisabled = isAdminLocked;
 
                       return (
                         <label
                           key={permKey}
                           className={`flex items-center gap-2 text-xs font-medium cursor-pointer select-none transition-colors
-                            ${isDisabled ? 'cursor-not-allowed opacity-80' : ''}
+                            ${isDisabled ? 'cursor-not-allowed opacity-50' : ''}
                             ${isChecked ? ds.text : ds.muted}
                           `}
                         >

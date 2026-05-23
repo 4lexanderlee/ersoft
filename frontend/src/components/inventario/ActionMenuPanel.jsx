@@ -1,11 +1,12 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
-import { FaTimes, FaBoxOpen, FaTags, FaLayerGroup, FaFileImport } from 'react-icons/fa';
+import { FaTimes, FaBoxOpen, FaTags, FaLayerGroup, FaFileImport, FaWarehouse } from 'react-icons/fa';
 
 const ACTIONS = [
   { label: 'Agregar Producto o Servicio', icon: FaBoxOpen, key: 'add' },
   { label: 'Crear Categorías', icon: FaTags, key: 'categorias' },
+  { label: 'Gestionar Almacenes', icon: FaWarehouse, key: 'almacenes' },
   { label: 'Crear Lotes', icon: FaLayerGroup, key: 'lotes' },
   { label: 'Importar dataset (MASIVO)', icon: FaFileImport, key: 'importar' },
 ];

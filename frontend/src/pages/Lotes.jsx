@@ -10,17 +10,20 @@ import Btn from '../components/ui/Btn';
 import Card from '../components/ui/Card';
 import Badge from '../components/ui/Badge';
 import EmptyState from '../components/ui/EmptyState';
+import RefreshButton from '../components/ui/RefreshButton';
 
 
 const Lotes = () => {
   const { theme } = useTheme();
-  const { user, login } = useAuth();
-  const { lotes, productos, createLote, cerrarLote, deleteLote } = useInventario();
+  const { user, verifyPassword } = useAuth();
+  const { lotes, productos, createLote, cerrarLote, deleteLote, almacenes, refreshData } = useInventario();
   const navigate = useNavigate();
   const ds = useDS();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [nombre, setNombre] = useState('');
+  const [selectedAlmacenId, setSelectedAlmacenId] = useState('');
+  const [almacenError, setAlmacenError] = useState('');
   const [pwd, setPwd] = useState('');
   const [pwdError, setPwdError] = useState('');
   const [closingLoteId, setClosingLoteId] = useState(null);
@@ -32,8 +35,37 @@ const Lotes = () => {
   const [deletePwd, setDeletePwd] = useState('');
   const [deleteError, setDeleteError] = useState('');
 
+  const DEFAULT_SUCURSALES = [
+    { id: '1', nombre: 'Sede Principal' },
+    { id: '2', nombre: 'Sede Norte' },
+    { id: '3', nombre: 'Sede Sur' },
+  ];
+  const sucursales = (() => {
+    try {
+      const saved = localStorage.getItem('ersoft_sucursales');
+      return saved ? JSON.parse(saved) : DEFAULT_SUCURSALES;
+    } catch (_) {
+      return DEFAULT_SUCURSALES;
+    }
+  })();
+  const getBranchName = (sucId) => {
+    const s = sucursales.find(x => String(x.id) === String(sucId));
+    return s ? (s.nombre || s.nombreComercial) : `Sucursal ${sucId}`;
+  };
+
+  const isMaster = user?.role === 'Master';
+  const userSucursalId = user?.sucursalId || '1';
+  const allowedAlmacenes = almacenes.filter(w => isMaster || String(w.sucursalId) === String(userSucursalId));
+
+  // Filter lotes visible to user (only user's sucursal if not master)
+  const visibleLotes = lotes.filter(l => {
+    if (isMaster) return true;
+    const alm = almacenes.find(a => String(a.id) === String(l.almacenId));
+    return alm && String(alm.sucursalId) === String(userSucursalId);
+  });
+
   // Sort: active first, then by creation date (newest first)
-  const sorted = [...lotes].sort((a, b) => {
+  const sorted = [...visibleLotes].sort((a, b) => {
     if (a.estado === 'Activo' && b.estado !== 'Activo') return -1;
     if (a.estado !== 'Activo' && b.estado === 'Activo') return 1;
     return b.id - a.id;
@@ -41,22 +73,20 @@ const Lotes = () => {
 
   const handleCreate = () => {
     if (!nombre.trim()) return;
-    const r = login(user.username, pwd);
-    if (!r.success) { setPwdError('Contraseña incorrecta'); return; }
-    createLote(nombre.trim());
-    setNombre(''); setPwd(''); setPwdError(''); setShowCreateForm(false);
+    if (!selectedAlmacenId) { setAlmacenError('El almacén es obligatorio'); return; }
+    if (!verifyPassword(pwd)) { setPwdError('Contraseña incorrecta'); return; }
+    createLote(nombre.trim(), selectedAlmacenId);
+    setNombre(''); setSelectedAlmacenId(''); setPwd(''); setPwdError(''); setAlmacenError(''); setShowCreateForm(false);
   };
 
   const handleClose = () => {
-    const r = login(user.username, closePwd);
-    if (!r.success) { setCloseError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(closePwd)) { setCloseError('Contraseña incorrecta'); return; }
     cerrarLote(closingLoteId);
     setClosingLoteId(null); setClosePwd(''); setCloseError('');
   };
 
   const handleDelete = () => {
-    const r = login(user.username, deletePwd);
-    if (!r.success) { setDeleteError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(deletePwd)) { setDeleteError('Contraseña incorrecta'); return; }
     deleteLote(deletingLoteId);
     setDeletingLoteId(null); setDeletePwd(''); setDeleteError('');
   };
@@ -69,11 +99,14 @@ const Lotes = () => {
         onBack={() => navigate('/inventario')}
         backLabel="Inventario"
         right={
-          <Btn variant="primary" size="sm" leftIcon={<FaPlus size={11} />}
-            onClick={() => setShowCreateForm(!showCreateForm)}
-            className="bg-yellow-500! text-black! hover:bg-yellow-400!">
-            Nuevo Lote
-          </Btn>
+          <div className="flex items-center gap-2">
+            <RefreshButton onRefresh={refreshData} />
+            <Btn variant="primary" size="sm" leftIcon={<FaPlus size={11} />}
+              onClick={() => setShowCreateForm(!showCreateForm)}
+              className="bg-yellow-500! text-black! hover:bg-yellow-400!">
+              Nuevo Lote
+            </Btn>
+          </div>
         }
       />
 
@@ -88,6 +121,22 @@ const Lotes = () => {
                 <input value={nombre} onChange={e => setNombre(e.target.value)} placeholder="ej. Lote Enero 2026"
                   className={`w-full mt-1 px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls}`} />
               </div>
+              <div>
+                <label className={`text-xs uppercase font-semibold ${ds.muted}`}>Seleccionar Almacén</label>
+                {almacenError && <p className="text-red-400 text-xs mt-1">{almacenError}</p>}
+                <select
+                  value={selectedAlmacenId}
+                  onChange={e => { setSelectedAlmacenId(e.target.value); setAlmacenError(''); }}
+                  className={`w-full mt-1 px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls}`}
+                >
+                  <option value="">-- Selecciona un Almacén --</option>
+                  {allowedAlmacenes.map(w => (
+                    <option key={w.id} value={w.id}>
+                      {w.nombre} {isMaster ? `(${getBranchName(w.sucursalId)})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
               <div className={`text-sm ${ds.muted}`}>
                 Fecha de creación: <span className="font-semibold">{new Date().toLocaleDateString('es-PE')}</span>
               </div>
@@ -95,11 +144,11 @@ const Lotes = () => {
                 <label className={`text-xs uppercase font-semibold ${ds.muted}`}>Confirmar con contraseña</label>
                 {pwdError && <p className="text-red-400 text-xs mt-1">{pwdError}</p>}
                 <input type="password" value={pwd} onChange={e => { setPwd(e.target.value); setPwdError(''); }}
-                  placeholder="Contraseña del master"
+                  placeholder={user.role === 'Master' ? 'Contraseña del master' : 'Tu contraseña'}
                   className={`w-full mt-1 px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls}`} />
               </div>
               <div className="flex gap-3">
-                <Btn variant="secondary" fullWidth onClick={() => { setShowCreateForm(false); setNombre(''); setPwd(''); }}>
+                <Btn variant="secondary" fullWidth onClick={() => { setShowCreateForm(false); setNombre(''); setSelectedAlmacenId(''); setPwd(''); setAlmacenError(''); setPwdError(''); }}>
                   Cancelar
                 </Btn>
                 <Btn variant="primary" fullWidth onClick={handleCreate}
@@ -124,6 +173,8 @@ const Lotes = () => {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {sorted.map(lote => {
               const isActive = lote.estado === 'Activo';
+              const almacen = almacenes.find(w => w.id === lote.almacenId);
+              const almacenNombre = almacen ? almacen.nombre : `Almacén ${lote.almacenId || 'N/A'}`;
               return (
                 <Card key={lote.id}
                   className={isActive ? (ds.isDark ? 'border-yellow-500/50 ring-1 ring-yellow-500/30' : 'border-yellow-400 ring-1 ring-yellow-300') : ''}>
@@ -145,6 +196,8 @@ const Lotes = () => {
                     </div>
                     </div>
                     <div className="grid grid-cols-2 gap-y-2 text-sm">
+                      <span className={ds.muted}>Almacén</span>
+                      <span className={`font-semibold ${ds.text}`}>{almacenNombre}</span>
                       <span className={ds.muted}>Fecha inicio</span>
                       <span className={`font-semibold ${ds.text}`}>{lote.fechaCreacion}</span>
                       {lote.fechaCierre && <>
@@ -187,7 +240,7 @@ const Lotes = () => {
             {closeError && <p className="text-red-400 text-sm">{closeError}</p>}
             <input type="password" value={closePwd}
               onChange={e => { setClosePwd(e.target.value); setCloseError(''); }}
-              placeholder="Ingresa tu contraseña para confirmar" autoFocus
+              placeholder={user.role === 'Master' ? 'Contraseña del master' : 'Tu contraseña'} autoFocus
               className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
             <div className="flex gap-3">
               <Btn variant="secondary" fullWidth onClick={() => { setClosingLoteId(null); setClosePwd(''); setCloseError(''); }}>
@@ -225,7 +278,7 @@ const Lotes = () => {
               {deleteError && <p className="text-red-400 text-sm">{deleteError}</p>}
               <input type="password" value={deletePwd}
                 onChange={e => { setDeletePwd(e.target.value); setDeleteError(''); }}
-                placeholder="Contraseña del master" autoFocus
+                placeholder={user.role === 'Master' ? 'Contraseña del master' : 'Tu contraseña'} autoFocus
                 className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
               <div className="flex gap-3">
                 <Btn variant="secondary" fullWidth onClick={() => { setDeletingLoteId(null); setDeletePwd(''); setDeleteError(''); }}>

@@ -4,7 +4,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useEmpresa } from '../../context/EmpresaContext';
 
 const SettingsModal = ({ onClose }) => {
-  const { logout } = useAuth();
+  const { logout, user } = useAuth();
   const { empresa } = useEmpresa();
   const navigate = useNavigate();
   const ref = useRef(null);
@@ -52,12 +52,13 @@ const SettingsModal = ({ onClose }) => {
       ref={ref}
       className="absolute bottom-12 left-12 w-56 bg-white rounded-2xl shadow-2xl py-2 z-50"
     >
-      {/* Empresa Button (wraps hover submenu) */}
-      <div
-        className="relative"
-        onMouseEnter={() => setShowSubmenu(true)}
-        onMouseLeave={() => setShowSubmenu(false)}
-      >
+      {/* Empresa Button (wraps hover submenu) - Only visible to Master or Administrador */}
+      {(user?.role === 'Master' || user?.role === 'Administrador') && (
+        <div
+          className="relative"
+          onMouseEnter={() => setShowSubmenu(true)}
+          onMouseLeave={() => setShowSubmenu(false)}
+        >
         <button
           onClick={(e) => {
             e.stopPropagation();
@@ -88,6 +89,7 @@ const SettingsModal = ({ onClose }) => {
           </div>
         )}
       </div>
+      )}
 
       {menuItems.map((item) => (
         <button

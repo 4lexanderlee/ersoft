@@ -7,12 +7,13 @@ import {
   FaUsers, FaPlus, FaPencilAlt, FaTrash, FaUserCheck, FaUserTimes, FaTimes, FaSave, FaSearch, FaFilter, FaCalendarAlt, FaIdCard
 } from 'react-icons/fa';
 import PageHeader from '../../components/ui/PageHeader';
+import RefreshButton from '../../components/ui/RefreshButton';
 
 const DEFAULT_USUARIOS = [
-  { id: '1', name: 'Alexander Lee Melgarejo', email: 'alexander@ersoft.com', role: 'Administrador', sucursalId: '1', sucursal: 'Sede Principal', status: 'Activo', docType: 'DNI', docNumber: '12345678', created_en: '15/01/2025' },
-  { id: '2', name: 'Juan Perez Lopez', email: 'juan_vendedor@ersoft.com', role: 'Vendedor', sucursalId: '2', sucursal: 'Sede Norte', status: 'Activo', docType: 'DNI', docNumber: '87654321', created_en: '10/02/2025' },
-  { id: '3', name: 'Maria Gomez Garcia', email: 'maria_cajero@ersoft.com', role: 'Cajero', sucursalId: '3', sucursal: 'Sede Sur', status: 'Activo', docType: 'CE', docNumber: '987654321', created_en: '20/03/2025' },
-  { id: '4', name: 'Pedro Rojas Diaz', email: 'pedro_almacen@ersoft.com', role: 'Almacenero', sucursalId: '1', sucursal: 'Sede Principal', status: 'Inactivo', docType: 'DNI', docNumber: '43218765', created_en: '22/04/2025' },
+  { id: '1', name: 'Alexander Lee Melgarejo', email: 'melgarejorom@gmail.com', password: 'master123', role: 'Administrador', sucursalId: '1', sucursal: 'Sede Principal', status: 'Activo', docType: 'DNI', docNumber: '12345678', created_en: '15/01/2025', sexo: 'Masculino', telefono: '975262030' },
+  { id: '2', name: 'Juan Perez Lopez', email: 'juan_vendedor@ersoft.com', password: '123456', role: 'Vendedor', sucursalId: '2', sucursal: 'Sede Norte', status: 'Activo', docType: 'DNI', docNumber: '87654321', created_en: '10/02/2025', sexo: 'Masculino', telefono: '987654321' },
+  { id: '3', name: 'Maria Gomez Garcia', email: 'maria_cajero@ersoft.com', password: '123456', role: 'Cajero', sucursalId: '3', sucursal: 'Sede Sur', status: 'Activo', docType: 'CE', docNumber: '987654321', created_en: '20/03/2025', sexo: 'Femenino', telefono: '912345678' },
+  { id: '4', name: 'Pedro Rojas Diaz', email: 'pedro_almacen@ersoft.com', password: '123456', role: 'Almacenero', sucursalId: '1', sucursal: 'Sede Principal', status: 'Inactivo', docType: 'DNI', docNumber: '43218765', created_en: '22/04/2025', sexo: 'Masculino', telefono: '998877665' },
 ];
 
 const DEFAULT_ROLES = ['Administrador', 'Vendedor', 'Cajero', 'Almacenero'];
@@ -99,10 +100,13 @@ const Usuarios = () => {
         const parsed = JSON.parse(saved);
         return parsed.map((u, i) => ({
           ...u,
-          email: u.email || (u.username ? `${u.username}@ersoft.com` : `usuario${i}@ersoft.com`),
+          password: u.password || (u.id === '1' ? 'master123' : '123456'),
+          email: u.id === '1' ? 'melgarejorom@gmail.com' : (u.email || (u.username ? `${u.username}@ersoft.com` : `usuario${i}@ersoft.com`)),
           docType: u.docType || 'DNI',
           docNumber: u.docNumber || '12345678',
           created_en: u.created_en || '15/01/2025',
+          sexo: u.sexo || (u.id === '3' ? 'Femenino' : 'Masculino'),
+          telefono: u.telefono || '999999999',
         }));
       } catch (e) {
         return DEFAULT_USUARIOS;
@@ -118,7 +122,7 @@ const Usuarios = () => {
 
   const [modalOpen, setModalOpen] = useState(false);
   const [editingUser, setEditingUser] = useState(null);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'Vendedor', sucursalId: '1', status: 'Activo', docType: 'DNI', docNumber: '' });
+  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'Vendedor', sucursalId: '1', status: 'Activo', docType: 'DNI', docNumber: '', sexo: 'Masculino', telefono: '' });
   const [errors, setErrors] = useState({});
 
   // Password verification states
@@ -128,6 +132,27 @@ const Usuarios = () => {
   useEffect(() => {
     localStorage.setItem('ersoft_usuarios', JSON.stringify(usuarios));
   }, [usuarios]);
+
+  const handleRefresh = () => {
+    const saved = localStorage.getItem('ersoft_usuarios');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        setUsuarios(parsed.map((u, i) => ({
+          ...u,
+          password: u.password || (u.id === '1' ? 'master123' : '123456'),
+          email: u.id === '1' ? 'melgarejorom@gmail.com' : (u.email || (u.username ? `${u.username}@ersoft.com` : `usuario${i}@ersoft.com`)),
+          docType: u.docType || 'DNI',
+          docNumber: u.docNumber || '12345678',
+          created_en: u.created_en || '15/01/2025',
+          sexo: u.sexo || (u.id === '3' ? 'Femenino' : 'Masculino'),
+          telefono: u.telefono || '999999999',
+        })));
+      } catch (e) {
+        console.error('Error refreshing users:', e);
+      }
+    }
+  };
 
   const validate = () => {
     const temp = {};
@@ -162,6 +187,12 @@ const Usuarios = () => {
       }
     }
 
+    if (!form.telefono || !form.telefono.trim()) {
+      temp.telefono = 'El teléfono es obligatorio.';
+    } else if (!/^\d{9}$/.test(form.telefono.trim())) {
+      temp.telefono = 'El teléfono debe tener exactamente 9 dígitos.';
+    }
+
     setErrors(temp);
     return Object.keys(temp).length === 0;
   };
@@ -177,7 +208,9 @@ const Usuarios = () => {
       sucursalId: sucursales[0]?.id || '1',
       status: 'Activo',
       docType: 'DNI',
-      docNumber: ''
+      docNumber: '',
+      sexo: 'Masculino',
+      telefono: ''
     });
     setErrors({});
     setModalOpen(true);
@@ -185,7 +218,7 @@ const Usuarios = () => {
 
   const handleOpenEdit = (user) => {
     setEditingUser(user);
-    setForm({ ...user, password: '' });
+    setForm({ ...user, password: '', sexo: user.sexo || 'Masculino', telefono: user.telefono || '' });
     setErrors({});
     setModalOpen(true);
   };
@@ -245,6 +278,8 @@ const Usuarios = () => {
           status: form.status,
           docType: form.docType,
           docNumber: form.docNumber,
+          sexo: form.sexo || 'Masculino',
+          telefono: form.telefono,
           ...(form.password ? { password: form.password } : {})
         } : item));
       } else {
@@ -260,6 +295,8 @@ const Usuarios = () => {
           password: form.password,
           docType: form.docType,
           docNumber: form.docNumber,
+          sexo: form.sexo || 'Masculino',
+          telefono: form.telefono,
           created_en: new Date().toLocaleDateString('es-PE'),
         }]);
       }
@@ -289,12 +326,15 @@ const Usuarios = () => {
         backLabel="Volver al menú"
         onBack={() => navigate('/principal')}
         right={
-          <button
-            onClick={handleOpenAdd}
-            className="flex items-center gap-2 px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-sm transition-colors"
-          >
-            <FaPlus size={12} /> Agregar Usuario
-          </button>
+          <div className="flex items-center gap-3">
+            <RefreshButton onRefresh={handleRefresh} />
+            <button
+              onClick={handleOpenAdd}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-sm transition-colors"
+            >
+              <FaPlus size={12} /> Agregar Usuario
+            </button>
+          </div>
         }
       />
 
@@ -504,31 +544,49 @@ const Usuarios = () => {
               </div>
 
               <div>
-                <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Correo Electrónico <span className="text-red-400">*</span></label>
+                <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Teléfono <span className="text-red-400">*</span></label>
                 <input
-                  type="email"
-                  maxLength={50}
-                  value={form.email}
-                  onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls} ${errors.email ? 'border-red-500' : ''}`}
-                  placeholder="Ej. alexander@ersoft.com"
-                  disabled={editingUser && editingUser.id === '1'}
+                  type="text"
+                  maxLength={9}
+                  value={form.telefono || ''}
+                  onKeyDown={onlyDigitsKey}
+                  onChange={e => setForm(prev => ({ ...prev, telefono: e.target.value.replace(/\D/g, '') }))}
+                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls} ${errors.telefono ? 'border-red-500' : ''}`}
+                  placeholder="9 dígitos"
                 />
-                {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
+                {errors.telefono && <p className="text-red-400 text-xs mt-1">{errors.telefono}</p>}
               </div>
 
-              <div>
-                <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>
-                  {editingUser ? 'Nueva Contraseña (dejar vacío para mantener)' : 'Contraseña'} <span className="text-red-400">{editingUser ? '' : '*'}</span>
-                </label>
-                <input
-                  type="password"
-                  value={form.password}
-                  onChange={e => setForm(prev => ({ ...prev, password: e.target.value }))}
-                  className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls} ${errors.password ? 'border-red-500' : ''}`}
-                  placeholder={editingUser ? 'Sin cambiar' : '••••••••'}
-                />
-                {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+              {/* Datos de Acceso Section */}
+              <div className="border border-gray-200 dark:border-gray-700 rounded-xl p-3.5 space-y-3 bg-gray-50/50 dark:bg-gray-800/30">
+                <p className={`text-xs font-bold uppercase tracking-wider ${ds.text}`}>Datos de Acceso</p>
+                <div>
+                  <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Correo Electrónico <span className="text-red-400">*</span></label>
+                  <input
+                    type="email"
+                    maxLength={50}
+                    value={form.email}
+                    onChange={e => setForm(prev => ({ ...prev, email: e.target.value }))}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls} ${errors.email ? 'border-red-500' : ''}`}
+                    placeholder="Ej. alexander@ersoft.com"
+                    disabled={editingUser && editingUser.id === '1'}
+                  />
+                  {errors.email && <p className="text-red-400 text-xs mt-1">{errors.email}</p>}
+                </div>
+
+                <div>
+                  <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>
+                    {editingUser ? 'Nueva Contraseña (dejar vacío para mantener)' : 'Contraseña'} <span className="text-red-400">{editingUser ? '' : '*'}</span>
+                  </label>
+                  <input
+                    type="password"
+                    value={form.password}
+                    onChange={e => setForm(prev => ({ ...prev, password: e.target.value }))}
+                    className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls} ${errors.password ? 'border-red-500' : ''}`}
+                    placeholder={editingUser ? 'Sin cambiar' : '••••••••'}
+                  />
+                  {errors.password && <p className="text-red-400 text-xs mt-1">{errors.password}</p>}
+                </div>
               </div>
 
               <div className="grid grid-cols-2 gap-3">
@@ -559,20 +617,34 @@ const Usuarios = () => {
                 </div>
               </div>
 
-              {editingUser && (
-                <div>
-                  <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Estado</label>
+              <div className="grid grid-cols-2 gap-3">
+                <div className={editingUser ? "col-span-1" : "col-span-2"}>
+                  <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Género</label>
                   <select
-                    value={form.status}
-                    onChange={e => setForm(prev => ({ ...prev, status: e.target.value }))}
+                    value={form.sexo || 'Masculino'}
+                    onChange={e => setForm(prev => ({ ...prev, sexo: e.target.value }))}
                     className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls}`}
-                    disabled={editingUser.id === '1'}
                   >
-                    <option value="Activo">Activo</option>
-                    <option value="Inactivo">Inactivo</option>
+                    <option value="Masculino">Masculino</option>
+                    <option value="Femenino">Femenino</option>
                   </select>
                 </div>
-              )}
+
+                {editingUser && (
+                  <div>
+                    <label className={`text-xs uppercase tracking-wider font-semibold block mb-1 ${ds.muted}`}>Estado</label>
+                    <select
+                      value={form.status}
+                      onChange={e => setForm(prev => ({ ...prev, status: e.target.value }))}
+                      className={`w-full px-3 py-2 border rounded-lg text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${ds.inputCls}`}
+                      disabled={editingUser.id === '1'}
+                    >
+                      <option value="Activo">Activo</option>
+                      <option value="Inactivo">Inactivo</option>
+                    </select>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="flex gap-3 justify-end border-t border-gray-200 dark:border-gray-700 pt-4 mt-2">

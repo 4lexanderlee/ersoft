@@ -9,16 +9,30 @@ const load = (key, fallback) => {
 };
 const save = (key, val) => localStorage.setItem(key, JSON.stringify(val));
 
+const DEFAULT_ALMACENES = [
+  { id: 101, nombre: 'Almacén Central Principal', sucursalId: '1', fechaCreacion: '15/01/2025' },
+  { id: 102, nombre: 'Almacén Insumos Norte', sucursalId: '2', fechaCreacion: '10/02/2025' },
+  { id: 103, nombre: 'Almacén Repuestos Sur', sucursalId: '3', fechaCreacion: '20/03/2025' },
+];
+
 export const InventarioProvider = ({ children }) => {
   const [productos, setProductos] = useState(() => {
     const data = load('ersoft_productos', []);
     return data.map(p => ({ ...p, costo: p.costo || 0 }));
   });
-  const [servicios, setServicios] = useState(() => load('ersoft_servicios', []));
-  const [lotes, setLotes] = useState(() => load('ersoft_lotes', []));
+  const [servicios, setServicios] = useState(() => {
+    const data = load('ersoft_servicios', []);
+    return data.map(s => ({ ...s, sucursalId: s.sucursalId || '1' }));
+  });
+  const [lotes, setLotes] = useState(() => {
+    const data = load('ersoft_lotes', []);
+    // Fallback: make sure all lotes have an almacenId (e.g. 101 if none exists)
+    return data.map(l => ({ ...l, almacenId: l.almacenId || 101 }));
+  });
   const [categorias, setCategorias] = useState(() =>
     load('ersoft_categorias', { productos: [], servicios: [] })
   );
+  const [almacenes, setAlmacenes] = useState(() => load('ersoft_almacenes', DEFAULT_ALMACENES));
 
   // ── Producto CRUD ──────────────────────────────────────────────
   const addProducto = (p) => {
@@ -83,10 +97,11 @@ export const InventarioProvider = ({ children }) => {
   };
 
   // ── Lotes ──────────────────────────────────────────────────────
-  const createLote = (nombre) => {
+  const createLote = (nombre, almacenId) => {
     const lote = {
       id: Date.now(),
       nombre,
+      almacenId: Number(almacenId),
       fechaCreacion: new Date().toLocaleDateString('es-PE'),
       fechaCierre: null,
       estado: 'Activo',
@@ -124,6 +139,63 @@ export const InventarioProvider = ({ children }) => {
       l.id === loteId ? { ...l, totalProductos: l.totalProductos + 1 } : l
     );
     setLotes(updated); save('ersoft_lotes', updated);
+  };
+
+  // ── Almacenes CRUD ──────────────────────────────────────────────
+  const addAlmacen = (nombre, sucursalId) => {
+    const newAlmacen = {
+      id: Date.now(),
+      nombre: nombre.trim(),
+      sucursalId,
+      fechaCreacion: new Date().toLocaleDateString('es-PE'),
+    };
+    setAlmacenes(prev => {
+      const updated = [...prev, newAlmacen];
+      save('ersoft_almacenes', updated);
+      return updated;
+    });
+  };
+
+  const deleteAlmacen = (almacenId) => {
+    setAlmacenes(prev => {
+      const updated = prev.filter(w => w.id !== almacenId);
+      save('ersoft_almacenes', updated);
+      return updated;
+    });
+
+    const lotesToDelete = lotes.filter(l => l.almacenId === almacenId);
+    const loteIdsToDelete = lotesToDelete.map(l => l.id);
+
+    if (loteIdsToDelete.length > 0) {
+      setLotes(prev => {
+        const updated = prev.filter(l => !loteIdsToDelete.includes(l.id));
+        save('ersoft_lotes', updated);
+        return updated;
+      });
+
+      setProductos(prev => {
+        const updated = prev.filter(p => !loteIdsToDelete.includes(p.loteId));
+        save('ersoft_productos', updated);
+        return updated;
+      });
+    }
+  };
+
+  const refreshData = () => {
+    setProductos(() => {
+      const data = load('ersoft_productos', []);
+      return data.map(p => ({ ...p, costo: p.costo || 0 }));
+    });
+    setServicios(() => {
+      const data = load('ersoft_servicios', []);
+      return data.map(s => ({ ...s, sucursalId: s.sucursalId || '1' }));
+    });
+    setLotes(() => {
+      const data = load('ersoft_lotes', []);
+      return data.map(l => ({ ...l, almacenId: l.almacenId || 101 }));
+    });
+    setCategorias(() => load('ersoft_categorias', { productos: [], servicios: [] }));
+    setAlmacenes(() => load('ersoft_almacenes', DEFAULT_ALMACENES));
   };
 
   // ── Categorias ─────────────────────────────────────────────────
@@ -209,6 +281,7 @@ export const InventarioProvider = ({ children }) => {
       lotes, loteActivo, createLote, cerrarLote, deleteLote, incrementLoteCount,
       categorias, addCategoria, removeCategoria,
       bulkImport,
+      almacenes, addAlmacen, deleteAlmacen, refreshData,
     }}>
       {children}
     </InventarioContext.Provider>

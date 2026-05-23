@@ -13,16 +13,15 @@ import {
 
 // The master user's "full" profile data (default/fallback)
 const MASTER_PROFILE = {
-  name: 'Alexander Lee',
-  apellidos: 'Melgarejo Romero',
+  name: 'Alexander Lee Melgarejo Romero',
   sexo: 'Masculino',
   telefono: '975 262 030',
   cargo: 'Master',
-  id: 'MR000001',
+  docType: 'DNI',
+  docNumber: '40404040',
   correo: 'melgarejorom@gmail.com',
   sucursal: '-',
   fechaInicio: '31/05/25',
-  edad: 20,
   permisos: ['Acceso total'],
 };
 
@@ -36,8 +35,80 @@ const loadProfile = () => {
   return MASTER_PROFILE;
 };
 
-/* ─── Master-password confirmation modal ─── */
-const MasterPasswordModal = ({ onConfirm, onCancel, theme, ds }) => {
+const DEFAULT_ROLES_PERMISOS = {
+  Administrador: {
+    ventas: { ver: true, crear: true, editar: true, eliminar: true },
+    inventario: { ver: true, crear: true, editar: true, eliminar: true },
+    lotes: { ver: true, crear: true, editar: true, eliminar: true },
+    tbf: { ver: true, crear: true, editar: true, eliminar: true },
+    graficos: { ver: true, crear: true, editar: true, eliminar: true },
+    empresa: { ver: true, crear: true, editar: true, eliminar: true },
+  },
+  Vendedor: {
+    ventas: { ver: true, crear: true, editar: false, eliminar: false },
+    inventario: { ver: true, crear: false, editar: false, eliminar: false },
+    lotes: { ver: false, crear: false, editar: false, eliminar: false },
+    tbf: { ver: true, crear: true, editar: false, eliminar: false },
+    graficos: { ver: false, crear: false, editar: false, eliminar: false },
+    empresa: { ver: false, crear: false, editar: false, eliminar: false },
+  },
+  Cajero: {
+    ventas: { ver: true, crear: true, editar: false, eliminar: false },
+    inventario: { ver: true, crear: false, editar: false, eliminar: false },
+    lotes: { ver: false, crear: false, editar: false, eliminar: false },
+    tbf: { ver: true, crear: true, editar: true, eliminar: false },
+    graficos: { ver: true, crear: false, editar: false, eliminar: false },
+    empresa: { ver: false, crear: false, editar: false, eliminar: false },
+  },
+  Almacenero: {
+    ventas: { ver: false, crear: false, editar: false, eliminar: false },
+    inventario: { ver: true, crear: true, editar: true, eliminar: false },
+    lotes: { ver: true, crear: true, editar: true, eliminar: true },
+    tbf: { ver: false, crear: false, editar: false, eliminar: false },
+    graficos: { ver: false, crear: false, editar: false, eliminar: false },
+    empresa: { ver: false, crear: false, editar: false, eliminar: false },
+  },
+};
+
+const getPermissionsList = (roleName) => {
+  if (roleName === 'Master') return ['Acceso total'];
+  try {
+    const saved = localStorage.getItem('ersoft_roles_permisos');
+    const rolesPermisos = saved ? JSON.parse(saved) : DEFAULT_ROLES_PERMISOS;
+    const rolePerm = rolesPermisos[roleName];
+    if (!rolePerm) return ['Sin permisos definidos'];
+    
+    const list = [];
+    const moduleKeys = Object.keys(rolePerm);
+    moduleKeys.forEach(modKey => {
+      const perms = rolePerm[modKey];
+      const activePerms = Object.keys(perms)
+        .filter(pKey => perms[pKey])
+        .map(pKey => {
+          const labels = { ver: 'Ver', crear: 'Crear', editar: 'Editar', eliminar: 'Eliminar' };
+          return labels[pKey] || pKey;
+        });
+      if (activePerms.length > 0) {
+        const modLabel = {
+          ventas: 'Ventas',
+          inventario: 'Inventario',
+          lotes: 'Lotes',
+          tbf: 'TBF',
+          graficos: 'Gráficos/Reportes',
+          empresa: 'Empresa'
+        }[modKey] || modKey;
+        list.push(`${modLabel}: ${activePerms.join(', ')}`);
+      }
+    });
+    return list.length > 0 ? list : ['Ninguno'];
+  } catch (e) {
+    console.error(e);
+    return ['Error al cargar permisos'];
+  }
+};
+
+/* ─── Password confirmation modal ─── */
+const MasterPasswordModal = ({ onConfirm, onCancel, theme, ds, isMaster }) => {
   const [pwd, setPwd] = useState('');
   const [show, setShow] = useState(false);
   const [err, setErr] = useState('');
@@ -64,7 +135,7 @@ const MasterPasswordModal = ({ onConfirm, onCancel, theme, ds }) => {
           </h2>
         </div>
         <p className={`text-sm ${ds.muted}`}>
-          Ingresa la contraseña master para editar los datos de acceso.
+          Ingresa {isMaster ? 'la contraseña master' : 'tu contraseña'} para editar los datos de acceso.
         </p>
 
         {/* Password input */}
@@ -72,7 +143,7 @@ const MasterPasswordModal = ({ onConfirm, onCancel, theme, ds }) => {
           <input
             autoFocus
             type={show ? 'text' : 'password'}
-            placeholder="Contraseña master"
+            placeholder={isMaster ? "Contraseña master" : "Contraseña"}
             value={pwd}
             onChange={e => { setPwd(e.target.value); setErr(''); }}
             onKeyDown={e => e.key === 'Enter' && handleConfirm()}
@@ -120,13 +191,55 @@ const maskPassword = (pw = '') => {
 
 const Perfil = () => {
   const { theme } = useTheme();
-  const { user, verifyMasterPassword, updateCredentials, getCredentials, syncProfileName } = useAuth();
+  const { user, verifyPassword, updateCredentials, getCredentials, syncProfileName } = useAuth();
   const navigate = useNavigate();
   const ds = useDS();
 
-  const [profile, setProfile]   = useState(loadProfile);
+  const getProfileForUser = (currentUser) => {
+    if (!currentUser) return MASTER_PROFILE;
+    if (currentUser.role === 'Master') {
+      return loadProfile();
+    }
+    try {
+      const savedUsersStr = localStorage.getItem('ersoft_usuarios');
+      if (savedUsersStr) {
+        const usersList = JSON.parse(savedUsersStr);
+        const found = usersList.find(u => String(u.id) === String(currentUser.id));
+        if (found) {
+          return {
+            name: found.name || '',
+            sexo: found.sexo || 'Masculino',
+            telefono: found.telefono || '',
+            cargo: found.role || '',
+            docType: found.docType || 'DNI',
+            docNumber: found.docNumber || '',
+            correo: found.email || '',
+            sucursal: found.sucursal || 'Sede Principal',
+            fechaInicio: found.created_en || '15/01/2025',
+            permisos: getPermissionsList(found.role)
+          };
+        }
+      }
+    } catch (e) {
+      console.error('Error loading standard user profile:', e);
+    }
+    return {
+      name: currentUser.name || '',
+      sexo: 'Masculino',
+      telefono: '',
+      cargo: currentUser.role || '',
+      docType: 'DNI',
+      docNumber: '',
+      correo: currentUser.username || '',
+      sucursal: currentUser.sucursalName || 'Sede Principal',
+      fechaInicio: '15/01/2025',
+      permisos: getPermissionsList(currentUser.role)
+    };
+  };
+
+  const [profile, setProfile]   = useState(() => getProfileForUser(user));
   const [editing, setEditing]   = useState(false);
-  const [formData, setFormData] = useState({ ...profile });
+  const [formData, setFormData] = useState(() => getProfileForUser(user));
   const [saveMsg, setSaveMsg]   = useState('');
 
   // Credentials state
@@ -149,15 +262,17 @@ const Perfil = () => {
   const valueColor = ds.text;
   const badgeBg    = ds.isDark ? 'bg-gray-700 text-gray-200' : 'bg-gray-100 text-gray-700';
 
-  // ── Edit pencil clicked → open master-password modal ──
+  // ── Edit pencil clicked → open password modal ──
   const startEdit = () => {
     setShowModal(true);
   };
 
   const handleModalConfirm = (pwd) => {
-    if (verifyMasterPassword(pwd)) {
+    if (verifyPassword(pwd)) {
       setShowModal(false);
-      setFormData({ ...profile });
+      const currentProfile = getProfileForUser(user);
+      setProfile(currentProfile);
+      setFormData({ ...currentProfile });
       setNewUsername(creds.username);
       setNewPassword(creds.password);
       setSaveMsg('');
@@ -173,18 +288,44 @@ const Perfil = () => {
   };
 
   const saveEdit = () => {
-    // Save profile fields
     const updated = { ...profile, ...formData };
     setProfile(updated);
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
-      window.dispatchEvent(new Event('storage'));
-      if (syncProfileName) syncProfileName(updated.name.trim());
-    } catch (_) {}
 
-    // Save credentials if they changed
+    const finalName = formData.name.trim();
     const trimUser = newUsername.trim();
     const trimPwd  = newPassword.trim();
+
+    if (user.role === 'Master') {
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+        window.dispatchEvent(new Event('storage'));
+      } catch (_) {}
+    } else {
+      try {
+        const savedUsersStr = localStorage.getItem('ersoft_usuarios');
+        if (savedUsersStr) {
+          const usersList = JSON.parse(savedUsersStr);
+          const updatedList = usersList.map(u => {
+            if (String(u.id) === String(user.id)) {
+              return {
+                ...u,
+                name: finalName,
+                sexo: formData.sexo,
+                telefono: formData.telefono,
+                email: trimUser || u.email,
+                password: trimPwd || u.password
+              };
+            }
+            return u;
+          });
+          localStorage.setItem('ersoft_usuarios', JSON.stringify(updatedList));
+        }
+      } catch (e) {
+        console.error('Error saving user profile data:', e);
+      }
+    }
+
+    if (syncProfileName) syncProfileName(finalName);
     if (trimUser && trimPwd) {
       updateCredentials(trimUser, trimPwd);
       setCreds({ username: trimUser, password: trimPwd });
@@ -206,6 +347,7 @@ const Perfil = () => {
           onCancel={() => setShowModal(false)}
           theme={theme}
           ds={ds}
+          isMaster={user?.role === 'Master'}
         />
       )}
 
@@ -232,13 +374,13 @@ const Perfil = () => {
             {/* Nombres row + badge + edit button */}
             <div className="flex items-start gap-3 flex-wrap">
               <div className="flex-1">
-                <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Nombres</span>
+                <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Nombre Completo</span>
                 {editing
                   ? <input
                       type="text"
                       value={formData.name}
                       onChange={e => field('name', e.target.value)}
-                      placeholder="Nombre(s)"
+                      placeholder="Nombre completo"
                       className={`px-3 py-1.5 rounded-lg border text-sm outline-none transition-colors w-full ${inputCls}`}
                     />
                   : <p className={`text-lg font-extrabold uppercase leading-tight ${valueColor}`}>{profile.name}</p>
@@ -293,23 +435,8 @@ const Perfil = () => {
               )}
             </div>
 
-            {/* Apellidos */}
-            <div>
-              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Apellidos</span>
-              {editing
-                ? <input
-                    type="text"
-                    value={formData.apellidos}
-                    onChange={e => field('apellidos', e.target.value)}
-                    placeholder="Apellido(s)"
-                    className={`px-3 py-1.5 rounded-lg border text-sm outline-none transition-colors w-full ${inputCls}`}
-                  />
-                : <p className={`text-base font-bold uppercase ${valueColor}`}>{profile.apellidos}</p>
-              }
-            </div>
-
             {/* Teléfono */}
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 mt-1">
               <FaPhone size={13} className={labelColor} />
               <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Teléfono</span>
               {editing
@@ -334,10 +461,10 @@ const Perfil = () => {
               <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Cargo</span>
               <p className={`text-lg font-extrabold uppercase ${valueColor}`}>{profile.cargo}</p>
             </div>
-            {/* ID – read only */}
+            {/* Documento – read only */}
             <div>
-              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>ID</span>
-              <p className={`text-lg font-extrabold ${valueColor}`}>{profile.id}</p>
+              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Documento ({profile.docType || 'DNI'})</span>
+              <p className={`text-lg font-extrabold ${valueColor}`}>{profile.docNumber || '40404040'}</p>
             </div>
             {/* Correo – editable */}
             <div>
@@ -364,23 +491,9 @@ const Perfil = () => {
               <p className={`font-bold ${valueColor}`}>{profile.sucursal}</p>
             </div>
             {/* Fecha inicio – read only */}
-            <div>
+            <div className="col-span-2">
               <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Fecha de Inicio</span>
               <p className={`text-lg font-extrabold ${valueColor}`}>{profile.fechaInicio}</p>
-            </div>
-            {/* Edad – editable */}
-            <div>
-              <span className={`text-xs uppercase tracking-wider ${labelColor}`}>Edad</span>
-              {editing
-                ? <input
-                    type="number"
-                    value={formData.edad}
-                    onChange={e => field('edad', e.target.value)}
-                    placeholder="Edad"
-                    className={`px-3 py-1.5 rounded-lg border text-sm outline-none transition-colors w-24 mt-1 ${inputCls}`}
-                  />
-                : <p className={`text-lg font-extrabold ${valueColor}`}>{profile.edad}</p>
-              }
             </div>
           </div>
         </div>

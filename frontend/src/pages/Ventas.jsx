@@ -11,6 +11,7 @@ import {
 } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
+import RefreshButton from '../components/ui/RefreshButton';
 import {
   validateDocNumber, validatePhone, validateEmail,
   validateName, sanitizeName, sanitizePhone, sanitizeDocNumber,
@@ -23,23 +24,25 @@ import {
 const DOC_TYPES = ['DNI', 'CE', 'RUC'];
 const DOC_MAX = { DNI: 8, CE: 9, RUC: 11 };
 const SALE_TYPES = ['Ticket', 'Boleta', 'Factura', 'Cotizar'];
-const DISCOUNT_CODES = { 'PROMO25': 0.25, 'DESC10': 0.10, 'VIP15': 0.15 };
 
 /* ─────────────────────────────────────────────────────────────────
    STEP 1 – Product selection + cart
 ───────────────────────────────────────────────────────────────── */
 const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const navigate = useNavigate();
-  const { productos, servicios, categorias, lotes } = useInventario();
+  const { productos, servicios, categorias, lotes, almacenes, refreshData } = useInventario();
+  const { user } = useAuth();
 
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [searchText, setSearchText] = useState('');
   const [catFilter, setCatFilter] = useState('');
   const [loteFilter, setLoteFilter] = useState('');
+  const [almacenFilter, setAlmacenFilter] = useState('');
 
   const [showTypeMenu, setShowTypeMenu] = useState(false);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showLoteMenu, setShowLoteMenu] = useState(false);
+  const [showAlmacenMenu, setShowAlmacenMenu] = useState(false);
   const [showCart, setShowCart] = useState(false);
   // Fix 4: raw input values map (allows empty string while typing)
   const [rawInputs, setRawInputs] = useState({});
@@ -47,6 +50,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const typeRef = useRef(null);
   const catRef = useRef(null);
   const loteRef = useRef(null);
+  const almacenRef = useRef(null);
   const cartRef = useRef(null);
 
   // Close dropdowns on outside click
@@ -55,15 +59,34 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
       if (typeRef.current && !typeRef.current.contains(e.target)) setShowTypeMenu(false);
       if (catRef.current && !catRef.current.contains(e.target)) setShowCatMenu(false);
       if (loteRef.current && !loteRef.current.contains(e.target)) setShowLoteMenu(false);
+      if (almacenRef.current && !almacenRef.current.contains(e.target)) setShowAlmacenMenu(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
+  const isMaster = user?.role === 'Master';
+  const userSucursalId = user?.sucursalId || '1';
+  const allowedAlmacenes = (almacenes || []).filter(w => isMaster || w.sucursalId === userSucursalId);
+
+  const allowedLotes = lotes.filter(l => {
+    const almacenOfLote = almacenes.find(w => w.id === l.almacenId);
+    if (!almacenOfLote) return false;
+    const matchesBranch = isMaster || almacenOfLote.sucursalId === userSucursalId;
+    const matchesAlmacen = !almacenFilter || l.almacenId === Number(almacenFilter);
+    return matchesBranch && matchesAlmacen;
+  });
+
+  // Filter services by branch if not Master
+  const visibleServicios = servicios.filter(s => {
+    if (isMaster) return true;
+    return String(s.sucursalId) === String(userSucursalId);
+  });
+
   // Combine products + services
   const allItems = [
     ...productos.map(p => ({ ...p, _type: 'Producto' })),
-    ...servicios.map(s => ({ ...s, _type: 'Servicio' })),
+    ...visibleServicios.map(s => ({ ...s, _type: 'Servicio' })),
   ];
 
   const filtered = allItems.filter(item => {
@@ -79,7 +102,20 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
     const matchCat = !catFilter || itemCats.includes(catFilter);
     const matchLote = !loteFilter || (item._type === 'Producto' && Number(item.loteId) === Number(loteFilter));
-    return matchType && matchSearch && matchCat && matchLote;
+    
+    // Warehouse filtering
+    let matchAlmacen = true;
+    if (item._type === 'Producto') {
+      const lote = lotes.find(l => l.id === item.loteId);
+      if (!lote) {
+        matchAlmacen = false;
+      } else {
+        const isAllowed = allowedAlmacenes.some(w => w.id === lote.almacenId);
+        matchAlmacen = isAllowed && (!almacenFilter || lote.almacenId === Number(almacenFilter));
+      }
+    }
+
+    return matchType && matchSearch && matchCat && matchLote && matchAlmacen;
   });
 
   const allCats = [...new Set([...categorias.productos, ...categorias.servicios])];
@@ -131,7 +167,10 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
 
   return (
     <div className={`flex flex-col flex-1 min-h-0 -m-6 ${pageBg}`}>
-      <PageHeader onBack={() => navigate('/principal')} />
+      <PageHeader
+        onBack={() => navigate('/principal')}
+        right={<RefreshButton onRefresh={refreshData} />}
+      />
 
       {/* Main */}
       <div className="flex flex-1 min-h-0 overflow-hidden">
@@ -193,12 +232,36 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
               )}
             </div>
 
+            {/* Almacén filter */}
+            {typeFilter !== 'Servicios' && allowedAlmacenes.length > 0 && (
+              <div ref={almacenRef} className="relative z-20">
+                <button onClick={() => setShowAlmacenMenu(!showAlmacenMenu)}
+                  className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium ${inputCls} hover:border-yellow-500 transition-colors`}>
+                  {almacenFilter ? (allowedAlmacenes.find(w => w.id === Number(almacenFilter))?.nombre || 'Almacén') : 'Todos los Almacenes'} {showAlmacenMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
+                </button>
+                {showAlmacenMenu && (
+                  <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
+                    <button onClick={() => { setAlmacenFilter(''); setLoteFilter(''); setShowAlmacenMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!almacenFilter ? 'font-bold text-yellow-500' : ''}`}>
+                      Todos los Almacenes
+                    </button>
+                    {allowedAlmacenes.map(w => (
+                      <button key={w.id} onClick={() => { setAlmacenFilter(w.id); setLoteFilter(''); setShowAlmacenMenu(false); }}
+                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${almacenFilter === w.id ? 'font-bold text-yellow-500' : ''}`}>
+                        {w.nombre}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Lote filter */}
-            {typeFilter !== 'Servicios' && lotes && lotes.length > 0 && (
+            {typeFilter !== 'Servicios' && allowedLotes.length > 0 && (
               <div ref={loteRef} className="relative z-20">
                 <button onClick={() => setShowLoteMenu(!showLoteMenu)}
                   className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium ${inputCls} hover:border-yellow-500 transition-colors`}>
-                  {loteFilter ? (lotes.find(l => l.id === Number(loteFilter))?.nombre || 'Lote') : 'Todos los Lotes'} {showLoteMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
+                  {loteFilter ? (allowedLotes.find(l => l.id === Number(loteFilter))?.nombre || 'Lote') : 'Todos los Lotes'} {showLoteMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
                 </button>
                 {showLoteMenu && (
                   <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
@@ -206,7 +269,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                       className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!loteFilter ? 'font-bold text-yellow-500' : ''}`}>
                       Todos los Lotes
                     </button>
-                    {lotes.map(l => (
+                    {allowedLotes.map(l => (
                       <button key={l.id} onClick={() => { setLoteFilter(l.id); setShowLoteMenu(false); }}
                         className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${loteFilter === l.id ? 'font-bold text-yellow-500' : ''}`}>
                         {l.nombre}
@@ -418,46 +481,135 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
   const subtotal = cart.reduce((s, { item, qty }) => s + qty * parseFloat(item.precio || 0), 0);
 
-  const calcDiscount = () => {
-     if (appliedCodes.length === 0) return { rate: 0, amt: 0 };
-     let amt = 0;
-     let globalRateSum = 0;
-     const today = new Date();
-     today.setHours(0,0,0,0);
+  const getActivePromotions = () => {
+    try {
+      const saved = localStorage.getItem('ersoft_promociones');
+      const promos = saved ? JSON.parse(saved) : [
+        { id: '1', nombre: 'PRUEBA DEF', tipo: 'coupon', valorTipo: '%', valor: 50, codigo: 'PRUEBA2', sucursales: 'global', estado: 'Activo', aplicaA: 'catalogo', vigenciaDesde: '2026-04-20', vigenciaHasta: '2026-07-27' },
+        { id: '2', nombre: 'PRUEBA 10', tipo: 'coupon', valorTipo: '%', valor: 40, codigo: 'INV2026', sucursales: 'global', estado: 'Activo', aplicaA: 'catalogo', vigenciaDesde: '2026-04-29', vigenciaHasta: '2026-08-30' },
+        { id: '3', nombre: '40% TODO', tipo: 'product', valorTipo: '%', valor: 40, sucursales: 'global', estado: 'Activo', aplicaA: 'catalogo', vigenciaDesde: '2026-04-20', vigenciaHasta: '2026-07-23' },
+        { id: '4', nombre: '30% TODO', tipo: 'product', valorTipo: '%', valor: 30, sucursales: 'global', estado: 'Activo', aplicaA: 'categoria', aplicaId: 'Bebidas', vigenciaDesde: '2026-04-20', vigenciaHasta: '2026-07-22' },
+        { id: '5', nombre: '3x2', tipo: 'qty', valorTipo: 'PEN', valor: 0, sucursales: 'global', estado: 'Activo', aplicaA: 'catalogo', qtyX: 3, qtyY: 2, qtyTipo: 'gratis', vigenciaDesde: '2026-04-18', vigenciaHasta: '2026-07-29' },
+        { id: '6', nombre: 'CLIENTES VIP', tipo: 'coupon', valorTipo: '%', valor: 15, codigo: 'VIP2026', sucursales: 'global', estado: 'Activo', aplicaA: 'catalogo', vigenciaDesde: '2026-04-20', vigenciaHasta: '2026-08-30' },
+      ];
 
-     cart.forEach(({item, qty}) => {
-       if (item.codigoDsct) {
-         const itemCode = item.codigoDsct.trim().toUpperCase();
-         if (appliedCodes.includes(itemCode)) {
-           const from = item.vigenciaDesde ? new Date(item.vigenciaDesde + 'T00:00:00') : null;
-           const to = item.vigenciaHasta ? new Date(item.vigenciaHasta + 'T23:59:59') : null;
-           if ((!from || today >= from) && (!to || today <= to)) {
-              let val = parseInt(item.valorDsct, 10) || 0;
-              if (item.tipoDsct === '%') {
-                   amt += ((parseFloat(item.precio) || 0) * (val / 100)) * qty;
-              } else {
-                   amt += val * qty;
-              }
-           }
-         }
-       }
-     });
+      const getLocalDateString = () => {
+        const d = new Date();
+        const year = d.getFullYear();
+        const month = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+      };
+      const todayStr = getLocalDateString();
+      const userSucursalId = user?.sucursalId || '1';
 
-     appliedCodes.forEach(code => {
-       if (DISCOUNT_CODES[code]) {
-          globalRateSum += DISCOUNT_CODES[code];
-       }
-     });
-
-     if (globalRateSum > 1) globalRateSum = 1;
-     let totalAmt = amt + (subtotal * globalRateSum);
-     if (totalAmt > subtotal) totalAmt = subtotal;
-
-     return { rate: globalRateSum, amt: totalAmt };
+      return promos.filter(p => {
+        if (p.estado !== 'Activo') return false;
+        const branchMatches = p.sucursales === 'global' || 
+          (Array.isArray(p.sucursales) && p.sucursales.includes(userSucursalId));
+        if (!branchMatches) return false;
+        if (p.vigenciaDesde && todayStr < p.vigenciaDesde) return false;
+        if (p.vigenciaHasta && todayStr > p.vigenciaHasta) return false;
+        return true;
+      });
+    } catch (e) {
+      console.error('Error loading promotions in Ventas:', e);
+      return [];
+    }
   };
 
+  const calcDiscount = () => {
+    const activePromos = getActivePromotions();
+    
+    // 1. Calculate item-level discounts
+    let totalItemDiscounts = 0;
+    cart.forEach(({ item, qty }) => {
+      const itemSubtotal = (parseFloat(item.precio) || 0) * qty;
+
+      // Find all matching standard or qty promos for this item
+      const matchingPromos = activePromos.filter(p => {
+        if (p.tipo === 'product' || p.tipo === 'qty') return true;
+        if (p.tipo === 'coupon') {
+          return appliedCodes.includes(p.codigo.trim().toUpperCase());
+        }
+        return false;
+      }).filter(p => {
+        if (p.aplicaA === 'catalogo') return true;
+        if (p.aplicaA === 'categoria') {
+          const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
+          return itemCats.includes(p.aplicaId);
+        }
+        if (p.aplicaA === 'producto') {
+          return String(item.id) === String(p.aplicaId);
+        }
+        return false;
+      });
+
+      // Prioritize manually entered coupons, otherwise take the first automatic promo in the list order
+      const appliedCoupon = matchingPromos.find(p => p.tipo === 'coupon');
+      const promoToApply = appliedCoupon || matchingPromos[0]; // first automatic promotion in the list order!
+
+      let itemDiscount = 0;
+      if (promoToApply) {
+        if (promoToApply.tipo === 'qty') {
+          const qX = parseInt(promoToApply.qtyX) || 1;
+          const qY = parseInt(promoToApply.qtyY) || 0;
+          if (qty >= qX) {
+            const groups = Math.floor(qty / qX);
+            const promoQty = groups * (qX - qY);
+            if (promoToApply.qtyTipo === 'gratis') {
+              itemDiscount = promoQty * (parseFloat(item.precio) || 0);
+            } else if (promoToApply.qtyTipo === 'descuento') {
+              const pct = parseFloat(promoToApply.qtyDescuento) || 0;
+              itemDiscount = promoQty * (parseFloat(item.precio) || 0) * (pct / 100);
+            }
+          }
+        } else {
+          // Standard product/coupon discount
+          if (promoToApply.valorTipo === '%') {
+            itemDiscount = (parseFloat(item.precio) || 0) * (parseFloat(promoToApply.valor) / 100) * qty;
+          } else {
+            itemDiscount = parseFloat(promoToApply.valor) * qty;
+          }
+        }
+      }
+      totalItemDiscounts += Math.min(itemSubtotal, itemDiscount);
+    });
+
+    // 2. Order-level discounts
+    const subtotalAfterItems = subtotal - totalItemDiscounts;
+    const orderPromos = activePromos.filter(p => {
+      if (p.tipo === 'order') return true;
+      if (p.tipo === 'coupon') {
+        return p.aplicaA === 'pedido' && appliedCodes.includes(p.codigo.trim().toUpperCase());
+      }
+      return false;
+    });
+
+    // Filter to find the first one that matches the minimum purchase criteria
+    const orderPromoToApply = orderPromos.find(p => {
+      const minC = parseFloat(p.minCompra) || 0;
+      return subtotalAfterItems >= minC;
+    });
+
+    let orderDiscount = 0;
+    if (orderPromoToApply) {
+      if (orderPromoToApply.valorTipo === '%') {
+        orderDiscount = subtotalAfterItems * (parseFloat(orderPromoToApply.valor) / 100);
+      } else {
+        orderDiscount = parseFloat(orderPromoToApply.valor);
+      }
+    }
+
+    const totalDiscountAmt = totalItemDiscounts + orderDiscount;
+    return { rate: subtotal > 0 ? (totalDiscountAmt / subtotal) : 0, amt: totalDiscountAmt };
+  };
+
+  const igvRate = parseFloat(empresa?.igv) || 0;
   const { rate: discount, amt: discountAmt } = calcDiscount();
   const total = Math.max(0, subtotal - discountAmt);
+  const opGravada = total / (1 + (igvRate / 100));
+  const igvMonto = total - opGravada;
 
   const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
   const inputCls = theme === 'dark' ? 'bg-transparent border-gray-600 text-white placeholder-gray-500' : 'bg-transparent border-gray-300 text-gray-900 placeholder-gray-400';
@@ -548,24 +700,31 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
        return;
     }
 
-    const today = new Date();
-    today.setHours(0,0,0,0);
-    
-    let itemMatch = cart.some(({item}) => {
-       if (item.codigoDsct && item.codigoDsct.trim().toUpperCase() === code) {
-         const from = item.vigenciaDesde ? new Date(item.vigenciaDesde + 'T00:00:00') : null;
-         const to = item.vigenciaHasta ? new Date(item.vigenciaHasta + 'T23:59:59') : null;
-         return (!from || today >= from) && (!to || today <= to);
-       }
-       return false;
-    });
+    const activePromos = getActivePromotions();
+    const couponPromo = activePromos.find(p => p.tipo === 'coupon' && p.codigo.trim().toUpperCase() === code);
 
-    if (itemMatch || DISCOUNT_CODES[code]) {
-       setAppliedCodes([...appliedCodes, code]);
-       setDiscountMsg('✓ Descuento aplicado');
-       setDiscountCode('');
+    if (couponPromo) {
+       let appliesToCart = false;
+       if (couponPromo.aplicaA === 'catalogo' || couponPromo.aplicaA === 'pedido') {
+         appliesToCart = true;
+       } else if (couponPromo.aplicaA === 'categoria') {
+         appliesToCart = cart.some(({ item }) => {
+           const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
+           return itemCats.includes(couponPromo.aplicaId);
+         });
+       } else if (couponPromo.aplicaA === 'producto') {
+         appliesToCart = cart.some(({ item }) => String(item.id) === String(couponPromo.aplicaId));
+       }
+
+       if (appliesToCart) {
+         setAppliedCodes([...appliedCodes, code]);
+         setDiscountMsg('✓ Cupón aplicado');
+         setDiscountCode('');
+       } else {
+         setDiscountMsg('✗ El cupón no aplica a los productos del carrito');
+       }
     } else {
-       setDiscountMsg('✗ Código inválido o no aplica a estos productos');
+       setDiscountMsg('✗ Código de cupón inválido o expirado');
     }
   };
 
@@ -598,7 +757,10 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   }, [docType, availableSaleTypes, saleType]);
 
   const handleCotizar = () => {
-    const saleData = { client: clientForm, saleType, discount, discountAmt, subtotal, total };
+    const igvRate = parseFloat(empresa?.igv) || 0;
+    const opGravada = total / (1 + (igvRate / 100));
+    const igvMonto = total - opGravada;
+    const saleData = { client: clientForm, saleType, discount, discountAmt, subtotal, total, opGravada, igvMonto, igvRate };
     const html = buildProformaHTML(empresa, cart, saleData, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
@@ -809,14 +971,22 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
               <span className={`font-semibold uppercase ${text}`}>Subtotal</span>
               <span className={text}>S/. {subtotal.toFixed(2)}</span>
             </div>
-            {discount > 0 && (
+            {discountAmt > 0 && (
               <div className="flex justify-between text-sm">
                 <span className="text-green-400">Descuento</span>
                 <span className="text-green-400">−S/. {discountAmt.toFixed(2)}</span>
               </div>
             )}
-            <div className="flex justify-between font-bold text-base">
-              <span className={text}>TOTAL</span>
+            <div className="flex justify-between text-sm">
+              <span className={`font-semibold uppercase ${text}`}>Op. Gravada</span>
+              <span className={text}>S/. {opGravada.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className={`font-semibold uppercase ${text}`}>IGV ({igvRate}%)</span>
+              <span className={text}>S/. {igvMonto.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between font-bold text-base border-t pt-2 border-dashed border-gray-400 dark:border-gray-600">
+              <span className={text}>IMPORTE TOTAL</span>
               <span className={text}>S/. {total.toFixed(2)}</span>
             </div>
             {saleType === 'Cotizar' ? (
@@ -825,7 +995,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
                 COTIZAR
               </button>
             ) : (
-              <button onClick={() => onNext({ client: clientForm, saleType, discount, discountAmt, total, subtotal })}
+              <button onClick={() => onNext({ client: clientForm, saleType, discount, discountAmt, total, subtotal, opGravada, igvMonto, igvRate })}
                 className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
                 IR A PAGAR <FaArrowLeft className="rotate-180" />
               </button>
@@ -857,9 +1027,18 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
   const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[payMethod] || payMethod;
   const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'Consumidor final';
   
-  const dscAmt = saleData?.discountAmt || (saleData?.discount ? saleData.subtotal * saleData.discount : 0);
-  const discountLabel = (saleData?.discount > 0 && saleData?.discount < 1) ? `Descuento (${(saleData.discount * 100).toFixed(0)}%)` : 'Descuento';
-  const discount = dscAmt > 0 ? `<tr><td colspan="3" style="text-align:right">${discountLabel}</td><td style="text-align:right;color:green">-S/. ${dscAmt.toFixed(2)}</td></tr>` : '';
+  const igvPct = parseFloat(empresa?.igv) || 0;
+  const subtotal = saleData?.subtotal || 0;
+  const dscAmt = saleData?.discountAmt || 0;
+  const total = saleData?.total || 0;
+  const opGravada = total / (1 + (igvPct / 100));
+  const igvMonto = total - opGravada;
+
+  let discountHtml = '';
+  if (dscAmt > 0) {
+    const pctLabel = (saleData?.discount > 0 && saleData?.discount < 1) ? ` (${(saleData.discount * 100).toFixed(0)}%)` : '';
+    discountHtml = `<tr><td colspan="3" style="text-align:right">Descuento${pctLabel}</td><td style="text-align:right;color:green">-S/. ${dscAmt.toFixed(2)}</td></tr>`;
+  }
 
   const logoTag = empresa?.logoPath
     ? `<div style="text-align:center;margin-bottom:8px"><img src="${empresa.logoPath}" alt="logo" style="max-height:70px;max-width:200px;object-fit:contain" /></div>`
@@ -899,8 +1078,11 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
       <thead><tr><th>Descripción</th><th>Cant.</th><th>P. Unit.</th><th>Total</th></tr></thead>
       <tbody>${rows}</tbody>
       <tfoot>
-        ${discount}
-        <tr class="total-row"><td colspan="3" style="text-align:right">TOTAL</td><td style="text-align:right">S/. ${(saleData?.total || 0).toFixed(2)}</td></tr>
+        <tr><td colspan="3" style="text-align:right">Subtotal</td><td style="text-align:right">S/. ${subtotal.toFixed(2)}</td></tr>
+        ${discountHtml}
+        <tr><td colspan="3" style="text-align:right">Op. Gravada</td><td style="text-align:right">S/. ${opGravada.toFixed(2)}</td></tr>
+        <tr><td colspan="3" style="text-align:right">IGV (${igvPct}%)</td><td style="text-align:right">S/. ${igvMonto.toFixed(2)}</td></tr>
+        <tr class="total-row"><td colspan="3" style="text-align:right">IMPORTE TOTAL</td><td style="text-align:right">S/. ${total.toFixed(2)}</td></tr>
       </tfoot>
     </table>
     <div class="footer">
@@ -925,11 +1107,27 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
   const clientEmail = saleData?.client?.correo || 'No especificado';
   
   const proformaId = `PROF-${Date.now().toString().slice(-6)}`;
-  const subTotalStr = (saleData.subtotal || 0).toFixed(2);
-  const totalStr = (saleData.total || 0).toFixed(2);
+  const igvPct = parseFloat(empresa?.igv) || 0;
+  const subtotal = saleData?.subtotal || 0;
+  const dscAmt = saleData?.discountAmt || (saleData?.discount ? subtotal * saleData.discount : 0);
+  const total = saleData?.total || 0;
+  const opGravada = total / (1 + (igvPct / 100));
+  const igvMonto = total - opGravada;
 
-  const qrTag = empresa?.qrPath
-    ? `<img src="${empresa.qrPath}" alt="QR" class="w-32 h-32 object-contain ml-4 rounded-lg shadow-sm border border-gray-100" />`
+  let qrSrc = '';
+  try {
+    const saved = localStorage.getItem('ersoft_metodos_pago');
+    if (saved) {
+      const metodos = JSON.parse(saved);
+      const dig = metodos.find(m => m.id === 'digital');
+      if (dig && dig.qrPath) {
+        qrSrc = dig.qrPath;
+      }
+    }
+  } catch (e) {}
+
+  const qrTag = qrSrc
+    ? `<img src="${qrSrc}" alt="QR" class="w-32 h-32 object-contain ml-4 rounded-lg shadow-sm border border-gray-100" />`
     : '';
 
   return `<!DOCTYPE html>
@@ -1072,17 +1270,21 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
           </tr>
           <tr>
             <td class="py-1">Subtotal:</td>
-            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${subTotalStr}</td>
+            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${subtotal.toFixed(2)}</td>
           </tr>
-          ${(saleData?.discountAmt > 0 || saleData?.discount > 0) ? `<tr><td class="py-1">${(saleData?.discount > 0 && saleData?.discount < 1) ? `Descuento (${(saleData.discount * 100).toFixed(0)}%)` : 'Descuento'}:</td><td class="text-right text-red-600 font-semibold whitespace-nowrap">-S/. ${(saleData?.discountAmt || (saleData.subtotal * saleData.discount)).toFixed(2)}</td></tr>` : ''}
+          ${(dscAmt > 0) ? `<tr><td class="py-1">${(saleData?.discount > 0 && saleData?.discount < 1) ? `Descuento (${(saleData.discount * 100).toFixed(0)}%)` : 'Descuento'}:</td><td class="text-right text-red-600 font-semibold whitespace-nowrap">-S/. ${dscAmt.toFixed(2)}</td></tr>` : ''}
           <tr>
-            <td class="py-1">IGV (18% ref.):</td>
-            <td class="text-right font-semibold text-gray-900">Incluido</td>
+            <td class="py-1">Op. Gravada:</td>
+            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${opGravada.toFixed(2)}</td>
+          </tr>
+          <tr>
+            <td class="py-1">IGV (${igvPct}%):</td>
+            <td class="text-right font-semibold text-gray-900 whitespace-nowrap">S/. ${igvMonto.toFixed(2)}</td>
           </tr>
         </table>
         <div class="border-t-2 border-black mt-2 pt-2 flex justify-between items-center">
           <span class="font-black text-xs text-gray-900 uppercase tracking-widest">TOTAL</span>
-          <span class="font-black text-[14px] text-green-700 whitespace-nowrap">S/. ${totalStr}</span>
+          <span class="font-black text-[14px] text-green-700 whitespace-nowrap">S/. ${total.toFixed(2)}</span>
         </div>
       </div>
     </div>
@@ -1137,30 +1339,169 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const [showPhoneModal, setShowPhoneModal]   = useState(false);
   const [phone, setPhone] = useState('');
   const [warnNoTicket, setWarnNoTicket] = useState(false);
+  const [montoRecibido, setMontoRecibido] = useState('');
   // Guard: ensures comprobante is saved only once per sale
   const saleIdRef = useRef(null);
   const getSaleId = () => {
     if (!saleIdRef.current) saleIdRef.current = genSaleId(saleData?.saleType || 'Ticket');
     return saleIdRef.current;
   };
+
+  const handleDupPantalla = () => {
+    const popup = window.open('', '_blank', 'width=600,height=700');
+    if (popup) {
+      const qrSrc = metodosPago.find(m => m.id === 'digital')?.qrPath || '';
+      const totalVal = (saleData?.total || 0).toFixed(2);
+      const razonSocial = empresa?.razonSocial || 'ERSOFT';
+
+      const htmlContent = `
+        <!DOCTYPE html>
+        <html lang="es">
+        <head>
+          <meta charset="UTF-8">
+          <title>Pago QR - ${razonSocial}</title>
+          <style>
+            body {
+              font-family: 'Inter', system-ui, -apple-system, sans-serif;
+              background: #0f172a;
+              color: #f8fafc;
+              display: flex;
+              flex-direction: column;
+              align-items: center;
+              justify-content: center;
+              min-height: 100vh;
+              margin: 0;
+              padding: 20px;
+              box-sizing: border-box;
+            }
+            .card {
+              background: #1e293b;
+              border-radius: 24px;
+              padding: 32px;
+              box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.3), 0 8px 10px -6px rgb(0 0 0 / 0.3);
+              text-align: center;
+              max-width: 400px;
+              width: 100%;
+              border: 1px solid #334155;
+            }
+            .title {
+              font-size: 20px;
+              font-weight: 800;
+              margin-bottom: 8px;
+              color: #fbbf24;
+              text-transform: uppercase;
+              letter-spacing: 0.05em;
+            }
+            .subtitle {
+              font-size: 14px;
+              color: #94a3b8;
+              margin-bottom: 24px;
+            }
+            .qr-container {
+              background: #ffffff;
+              border-radius: 16px;
+              padding: 16px;
+              margin: 0 auto 24px;
+              width: 256px;
+              height: 256px;
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              box-shadow: inset 0 2px 4px 0 rgb(0 0 0 / 0.06);
+            }
+            .qr-img {
+              max-width: 100%;
+              max-height: 100%;
+              object-fit: contain;
+            }
+            .amount-label {
+              font-size: 14px;
+              color: #94a3b8;
+              text-transform: uppercase;
+              font-weight: 600;
+              margin-bottom: 4px;
+            }
+            .amount-val {
+              font-size: 32px;
+              font-weight: 900;
+              color: #f8fafc;
+              margin-bottom: 24px;
+            }
+            .badges {
+              display: flex;
+              justify-content: center;
+              gap: 16px;
+            }
+            .badge {
+              font-weight: 900;
+              padding: 8px 16px;
+              border-radius: 12px;
+              font-size: 14px;
+              text-transform: uppercase;
+            }
+            .yape {
+              background: #7022f3;
+              color: #ffffff;
+            }
+            .plin {
+              background: #00c896;
+              color: #ffffff;
+            }
+            .no-qr {
+              color: #64748b;
+              font-size: 14px;
+              font-style: italic;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="card">
+            <div class="title">${razonSocial}</div>
+            <div class="subtitle">Escanea el código para realizar tu pago</div>
+            <div class="qr-container">
+              ${qrSrc ? `<img class="qr-img" src="${qrSrc}" alt="QR Pago" />` : '<div class="no-qr">Sin código QR disponible</div>'}
+            </div>
+            <div class="amount-label">Monto a pagar</div>
+            <div class="amount-val">S/. ${totalVal}</div>
+            <div class="badges">
+              <span class="badge yape">Yape</span>
+              <span class="badge plin">Plin</span>
+            </div>
+          </div>
+        </body>
+        </html>
+      `;
+      popup.document.write(htmlContent);
+      popup.document.close();
+    }
+  };
   const saveComprobante = () => {
     if (saleIdRef.current) return; // already saved
     const saleId = getSaleId();
+    const igvPct = parseFloat(empresa?.igv) || 0;
+    const totalVal = saleData?.total || 0;
+    const opGravadaVal = totalVal / (1 + (igvPct / 100));
+    const igvMontoVal = totalVal - opGravadaVal;
+
     const record = {
       id: saleId,
       tipo: saleData?.saleType || 'Ticket',
       fecha: new Date().toISOString(),
       estado: 'Activo',
+      sucursalId: user?.sucursalId || '1',
       cliente: saleData?.client || null,
       vendedor: user?.name || user?.username || 'Vendedor',
       items: cart.map(({ item, qty }) => ({
         id: item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
         _type: item._type,
       })),
-      total: saleData.total,
-      subtotal: saleData.subtotal,
+      total: totalVal,
+      subtotal: saleData?.subtotal || 0,
       discount: saleData?.discount || 0,
       discountAmt: saleData?.discountAmt || 0,
+      opGravada: opGravadaVal,
+      igvMonto: igvMontoVal,
+      igvRate: igvPct,
       metodoPago: selectedMethod,
       empresa: empresa ? {
         razonSocial: empresa.razonSocial,
@@ -1265,6 +1606,8 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
     }
 
     // Method selected, ticket not yet generated
+    const isCashInsufficient = selectedMethod === 'cash' && montoRecibido !== '' && parseFloat(montoRecibido) < saleData.total;
+
     return (
       <div className="text-center px-8 space-y-6">
         <p className={`text-sm italic text-center ${subTx}`}>
@@ -1277,8 +1620,15 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
             GENERAR CODIGO QR
           </button>
         ) : (
-          <button onClick={openTicket}
-            className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full tracking-widest text-sm">
+          <button
+            onClick={openTicket}
+            disabled={isCashInsufficient}
+            className={`w-full py-3 font-bold rounded-full tracking-widest text-sm transition-colors ${
+              isCashInsufficient 
+                ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
+                : 'bg-[#1a1a1a] hover:bg-gray-800 text-white'
+            }`}
+          >
             GENERAR TICKET
           </button>
         )}
@@ -1297,37 +1647,65 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
           {PAYMENT_METHODS.map(pm => {
             const isActive = metodosPago.find(m => m.id === pm.key)?.activo !== false;
             return (
-              <button key={pm.key}
-                onClick={() => { setSelectedMethod(pm.key); setTicketGenerated(false); setWarnNoTicket(false); }}
-                className={`flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left relative
-                  ${selectedMethod === pm.key
-                    ? (isActive ? 'border-yellow-500 bg-yellow-500/5' : 'border-red-500 bg-red-500/5')
-                    : (isActive ? cardIdle : 'border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-850/40 opacity-60')}
-                `}
-              >
-                <div className="flex justify-between items-center w-full">
-                  <p className={`font-bold italic text-base ${text}`}>{pm.label}</p>
-                  {!isActive && (
-                    <span className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/30 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
-                      Inhabilitado
-                    </span>
+              <div key={pm.key} className="w-full">
+                <button
+                  onClick={() => { setSelectedMethod(pm.key); setTicketGenerated(false); setWarnNoTicket(false); }}
+                  className={`w-full flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left relative
+                    ${selectedMethod === pm.key
+                      ? (isActive ? 'border-yellow-500 bg-yellow-500/5' : 'border-red-500 bg-red-500/5')
+                      : (isActive ? cardIdle : 'border-gray-300 dark:border-gray-700 bg-gray-100 dark:bg-gray-850/40 opacity-60')}
+                  `}
+                >
+                  <div className="flex justify-between items-center w-full">
+                    <p className={`font-bold italic text-base ${text}`}>{pm.label}</p>
+                    {!isActive && (
+                      <span className="text-[10px] bg-red-500/10 text-red-500 border border-red-500/30 px-2.5 py-0.5 rounded-full font-bold uppercase tracking-wider">
+                        Inhabilitado
+                      </span>
+                    )}
+                  </div>
+                  {pm.key === 'digital' && (
+                    <div className="flex items-center flex-wrap gap-3 mt-3">
+                      {/* Yape */}
+                      <span className="px-2 py-1 rounded-lg font-black text-sm" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
+                      {/* Plin */}
+                      <span className="px-2 py-1 rounded-full font-black text-sm" style={{background:'#00c896',color:'#fff'}}>plin</span>
+                      {/* izipay */}
+                      <span className="px-2 py-1 rounded-sm font-black text-sm" style={{background:'#f04e37',color:'#fff'}}>izipay</span>
+                    </div>
                   )}
-                </div>
-                {pm.key === 'digital' && (
-                  <div className="flex items-center flex-wrap gap-3 mt-3">
-                    {/* Yape */}
-                    <span className="px-2 py-1 rounded-lg font-black text-sm" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
-                    {/* Plin */}
-                    <span className="px-2 py-1 rounded-full font-black text-sm" style={{background:'#00c896',color:'#fff'}}>plin</span>
-                    {/* izipay */}
-                    <span className="px-2 py-1 rounded-sm font-black text-sm" style={{background:'#f04e37',color:'#fff'}}>izipay</span>
+                  {pm.key === 'bank'  && <span className="text-2xl mt-3">📱</span>}
+                  {pm.key === 'cash'  && <span className="text-2xl mt-3">💰</span>}
+                  {pm.key === 'pos'   && <span className="text-2xl mt-3">💳</span>}
+                  {pm.sub && <p className={`text-xs mt-1 ${subTx}`}>{pm.sub}</p>}
+                </button>
+
+                {pm.key === 'cash' && selectedMethod === 'cash' && (
+                  <div className={`mt-3 w-full p-4 rounded-xl border ${theme === 'dark' ? 'bg-gray-800/40 border-gray-700' : 'bg-gray-50 border-gray-200'} space-y-3`}>
+                    <label className={`block text-xs font-bold uppercase tracking-wider ${text}`}>Monto Recibido</label>
+                    <input
+                      type="number"
+                      step="0.1"
+                      value={montoRecibido}
+                      onChange={(e) => setMontoRecibido(e.target.value)}
+                      placeholder="Ingrese cantidad en efectivo"
+                      className={`w-full px-3 py-2 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-yellow-500 ${
+                        theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-white border-gray-300'
+                      }`}
+                    />
+                    {montoRecibido !== '' && (
+                      <div className="flex justify-between items-center text-sm font-bold mt-1">
+                        <span className={text}>Vuelto:</span>
+                        {parseFloat(montoRecibido) < saleData.total ? (
+                          <span className="text-red-500">Monto Insuficiente</span>
+                        ) : (
+                          <span className="text-green-600">S/. {(parseFloat(montoRecibido) - saleData.total).toFixed(2)}</span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 )}
-                {pm.key === 'bank'  && <span className="text-2xl mt-3">📱</span>}
-                {pm.key === 'cash'  && <span className="text-2xl mt-3">💰</span>}
-                {pm.key === 'pos'   && <span className="text-2xl mt-3">💳</span>}
-                {pm.sub && <p className={`text-xs mt-1 ${subTx}`}>{pm.sub}</p>}
-              </button>
+              </div>
             );
           })}
           <button onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
@@ -1357,13 +1735,13 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
               ✕
             </button>
 
-            {/* QR Image */}
+             {/* QR Image */}
             <div className="w-64 h-64 rounded-2xl border-4 border-gray-300 flex items-center justify-center overflow-hidden bg-white">
-              {empresa?.qrPath
-                ? <img src={empresa.qrPath} alt="QR pago" className="w-full h-full object-contain" />
+              {metodosPago.find(m => m.id === 'digital')?.qrPath
+                ? <img src={metodosPago.find(m => m.id === 'digital').qrPath} alt="QR pago" className="w-full h-full object-contain" />
                 : <div className="flex flex-col items-center gap-2 text-gray-400">
                     <span className="text-5xl">📷</span>
-                    <p className="text-xs text-center px-4">Sin QR — adjunta uno desde Ajustes &gt; Empresa</p>
+                    <p className="text-xs text-center px-4">Sin QR — adjunta uno desde Métodos de Pago</p>
                   </div>
               }
             </div>
@@ -1385,11 +1763,11 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
                 className="flex-1 py-3 bg-[#1a1a1a] hover:bg-gray-700 text-white font-bold rounded-full text-sm tracking-wider">
                 GENERAR TICKET
               </button>
-              <button onClick={() => { setShowQrModal(false); setShowPhoneModal(true); }}
+              <button onClick={handleDupPantalla}
                 className={`flex-1 py-3 border-2 font-bold rounded-full text-sm tracking-wide ${
                   theme === 'dark' ? 'border-gray-500 text-gray-200 hover:bg-gray-700' : 'border-gray-400 text-gray-800 hover:bg-gray-100'
                 }`}>
-                ENVIAR COMPROBANTE VIRTUAL
+                DUP. PANTALLA
               </button>
             </div>
           </div>

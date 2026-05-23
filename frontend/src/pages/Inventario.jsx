@@ -17,6 +17,8 @@ import AddProductPanel from '../components/inventario/AddProductPanel';
 import AddServicioPanel from '../components/inventario/AddServicioPanel';
 import AddCategoriasPanel from '../components/inventario/AddCategoriasPanel';
 import ImportDatasetPanel from '../components/inventario/ImportDatasetPanel';
+import AlmacenesPanel from '../components/inventario/AlmacenesPanel';
+import RefreshButton from '../components/ui/RefreshButton';
 
 /* ─── Helpers ───────────────────────────────────────────────────── */
 /** Normalise categorias field: supports both legacy string and new array */
@@ -28,7 +30,7 @@ const getCats = (item) => {
 
 /* ─── Auth Delete Modal ─────────────────────────────────────────── */
 const AuthDeleteModal = ({ theme, ds, onConfirm, onCancel, label = 'este elemento' }) => {
-  const { login, user } = useAuth();
+  const { verifyPassword } = useAuth();
   const [pwd, setPwd] = useState('');
   const [err, setErr] = useState('');
   const inputCls = theme === 'dark'
@@ -36,8 +38,7 @@ const AuthDeleteModal = ({ theme, ds, onConfirm, onCancel, label = 'este element
     : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400';
 
   const handleConfirm = () => {
-    const r = login(user.username, pwd);
-    if (!r.success) { setErr('Contraseña incorrecta'); return; }
+    if (!verifyPassword(pwd)) { setErr('Contraseña incorrecta'); return; }
     onConfirm();
   };
 
@@ -49,11 +50,11 @@ const AuthDeleteModal = ({ theme, ds, onConfirm, onCancel, label = 'este element
             <span className="text-2xl">🗑️</span>
           </div>
           <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar</h3>
-          <p className={`text-sm mt-1 ${ds.muted}`}>Confirma con tu contraseña master para eliminar <strong>{label}</strong>.</p>
+          <p className={`text-sm mt-1 ${ds.muted}`}>Confirma con tu contraseña para eliminar <strong>{label}</strong>.</p>
         </div>
         {err && <p className="text-red-400 text-sm">{err}</p>}
         <input type="password" value={pwd} onChange={e => { setPwd(e.target.value); setErr(''); }}
-          placeholder="Contraseña master" autoFocus
+          placeholder="Contraseña" autoFocus
           className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${inputCls}`} />
         <div className="flex gap-3">
           <Btn variant="secondary" fullWidth onClick={onCancel}>Cancelar</Btn>
@@ -200,7 +201,7 @@ const ServicioCard = ({ item, onEdit, onDelete, theme, selectMode, isSelected, t
 };
 
 /* ─── Filter Panel ──────────────────────────────────────────────── */
-const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats, categorias, theme, activeTab, lotes, selectedLote, setSelectedLote }) => {
+const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats, categorias, theme, activeTab, lotes, selectedLote, setSelectedLote, almacenes, selectedWarehouse, setSelectedWarehouse, user }) => {
   const panelRef = useRef(null);
   useEffect(() => {
     const handler = (e) => { if (panelRef.current && !panelRef.current.contains(e.target)) onClose(); };
@@ -221,6 +222,14 @@ const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats
   const toggleCat = (cat) => setSelectedCats(prev =>
     prev.includes(cat) ? prev.filter(c => c !== cat) : [...prev, cat]
   );
+
+  const isMaster = user?.role === 'Master';
+  const userSucursalId = user?.sucursalId || '1';
+  const allowedAlmacenes = (almacenes || []).filter(w => isMaster || w.sucursalId === userSucursalId);
+  const allowedWarehouseIds = allowedAlmacenes.map(w => w.id);
+  const filteredLotes = selectedWarehouse
+    ? lotes.filter(l => l.almacenId === Number(selectedWarehouse))
+    : lotes.filter(l => isMaster || allowedWarehouseIds.includes(l.almacenId));
 
   return (
     <div ref={panelRef} className={`absolute top-full right-0 mt-1 w-56 rounded-2xl border shadow-2xl z-30 p-4 ${bg}`}>
@@ -249,7 +258,26 @@ const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats
           ))}
         </div>
       )}
-      {activeTab === 'productos' && lotes && lotes.length > 0 && (
+      {activeTab === 'productos' && allowedAlmacenes.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
+          <label className="flex items-center justify-between font-semibold text-sm mb-2">
+            Almacén
+          </label>
+          <select value={selectedWarehouse} onChange={(e) => {
+            const val = e.target.value ? Number(e.target.value) : '';
+            setSelectedWarehouse(val);
+            setSelectedLote(''); // reset selected lot when warehouse changes
+          }}
+            className={`w-full text-xs px-2 py-1.5 border rounded-lg ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} outline-none`}
+          >
+            <option value="">Todos los almacenes</option>
+            {allowedAlmacenes.map(w => (
+              <option key={w.id} value={w.id}>{w.nombre}</option>
+            ))}
+          </select>
+        </div>
+      )}
+      {activeTab === 'productos' && filteredLotes && filteredLotes.length > 0 && (
         <div className="mt-3 pt-3 border-t border-gray-200 dark:border-gray-700">
           <label className="flex items-center justify-between font-semibold text-sm mb-2">
             Lote
@@ -258,7 +286,7 @@ const FilterPanel = ({ onClose, sortBy, setSortBy, selectedCats, setSelectedCats
             className={`w-full text-xs px-2 py-1.5 border rounded-lg ${theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900'} outline-none`}
           >
             <option value="">Todos los lotes</option>
-            {lotes.map(l => (
+            {filteredLotes.map(l => (
               <option key={l.id} value={l.id}>{l.nombre}</option>
             ))}
           </select>
@@ -273,8 +301,21 @@ const Inventario = () => {
   const { theme } = useTheme();
   const navigate = useNavigate();
   const ds = useDS();
-  const { login, user } = useAuth();
-  const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias, lotes } = useInventario();
+  const { verifyPassword, user } = useAuth();
+  const { productos, deleteProducto, servicios, deleteServicio, loteActivo, categorias, lotes, almacenes, refreshData } = useInventario();
+
+  const isMaster = user?.role === 'Master';
+  const userSucursalId = user?.sucursalId || '1';
+
+  const allowedWarehouseIds = (almacenes || [])
+    .filter(w => isMaster || w.sucursalId === userSucursalId)
+    .map(w => w.id);
+  const allowedLoteIds = (lotes || [])
+    .filter(l => isMaster || allowedWarehouseIds.includes(l.almacenId))
+    .map(l => l.id);
+
+  const myProductos = productos.filter(p => isMaster || allowedLoteIds.includes(p.loteId));
+  const myServicios = servicios.filter(s => isMaster || s.sucursalId === userSucursalId);
 
   const [activeTab, setActiveTab] = useState('productos');
   const [panel, setPanel] = useState(null);
@@ -285,6 +326,7 @@ const Inventario = () => {
   const [selectedCats, setSelectedCats] = useState([]);
   const [searchText, setSearchText] = useState('');
   const [selectedLote, setSelectedLote] = useState('');
+  const [selectedWarehouse, setSelectedWarehouse] = useState('');
 
   const [noLoteAlert, setNoLoteAlert] = useState(false);
 
@@ -310,6 +352,8 @@ const Inventario = () => {
       setPanel('cats');
     } else if (key === 'importar') {
       setPanel('importar');
+    } else if (key === 'almacenes') {
+      setPanel('almacenes');
     }
   };
 
@@ -332,6 +376,12 @@ const Inventario = () => {
     if (selectedLote && activeTab === 'productos') {
       arr = arr.filter(i => i.loteId === selectedLote);
     }
+    if (selectedWarehouse && activeTab === 'productos') {
+      arr = arr.filter(i => {
+        const lote = lotes.find(l => l.id === i.loteId);
+        return lote && lote.almacenId === Number(selectedWarehouse);
+      });
+    }
     if (sortBy === 'az') arr.sort((a, b) => a.nombre.localeCompare(b.nombre));
     if (sortBy === 'za') arr.sort((a, b) => b.nombre.localeCompare(a.nombre));
     if (sortBy === 'priceDsc') arr.sort((a, b) => b.precio - a.precio);
@@ -341,12 +391,12 @@ const Inventario = () => {
     return arr;
   };
 
-  // Gather all unique category names for the filter panel
-  const allProductCats = [...new Set(productos.flatMap(p => getCats(p)))];
-  const allServicioCats = [...new Set(servicios.flatMap(s => getCats(s)))];
+  // Gather all unique category names for the filter panel (filtered by branch)
+  const allProductCats = [...new Set(myProductos.flatMap(p => getCats(p)))];
+  const allServicioCats = [...new Set(myServicios.flatMap(s => getCats(s)))];
 
-  const filteredProductos = applyFilters(productos);
-  const filteredServicios = applyFilters(servicios);
+  const filteredProductos = applyFilters(myProductos);
+  const filteredServicios = applyFilters(myServicios);
   
   // ── Bulk select helpers ──
   const enterSelectMode = () => {
@@ -360,8 +410,7 @@ const Inventario = () => {
 
   const openBulkDeleteModal = () => { setBulkPwd(''); setBulkPwdError(''); setShowBulkModal(true); };
   const handleBulkDelete = () => {
-    const result = login(user?.username || '', bulkPwd);
-    if (!result?.success) { setBulkPwdError('Contraseña incorrecta'); return; }
+    if (!verifyPassword(bulkPwd)) { setBulkPwdError('Contraseña incorrecta'); return; }
     
     // Delete selected items based on activeTab
     if (activeTab === 'productos') {
@@ -382,6 +431,7 @@ const Inventario = () => {
     if (panel === 'addServicio') return <AddServicioPanel onClose={() => setPanel(null)} editItem={editItem} />;
     if (panel === 'cats') return <AddCategoriasPanel onClose={() => setPanel(null)} />;
     if (panel === 'importar') return <ImportDatasetPanel onClose={() => setPanel(null)} />;
+    if (panel === 'almacenes') return <AlmacenesPanel onClose={() => setPanel(null)} />;
     return null;
   };
 
@@ -389,7 +439,10 @@ const Inventario = () => {
     <div className={`flex flex-col flex-1 -m-6 relative overflow-hidden ${ds.pageBg}`}>
 
       {/* Header */}
-      <PageHeader onBack={() => navigate('/principal')} />
+      <PageHeader
+        onBack={() => navigate('/principal')}
+        right={<RefreshButton onRefresh={refreshData} />}
+      />
 
       {/* Main area */}
       <div className="flex flex-1 overflow-hidden">
@@ -428,6 +481,10 @@ const Inventario = () => {
                   lotes={lotes}
                   selectedLote={selectedLote}
                   setSelectedLote={setSelectedLote}
+                  almacenes={almacenes}
+                  selectedWarehouse={selectedWarehouse}
+                  setSelectedWarehouse={setSelectedWarehouse}
+                  user={user}
                 />
               )}
             </div>
@@ -579,12 +636,12 @@ const Inventario = () => {
               </div>
               <h3 className={`font-bold text-lg ${ds.text}`}>Eliminar Múltiples</h3>
               <p className={`text-sm mt-1 ${ds.muted}`}>
-                Confirma con tu contraseña master para eliminar <strong>{selectedIds.length} elemento{selectedIds.length !== 1 ? 's' : ''}</strong> de forma permanente.
+                Confirma con tu contraseña para eliminar <strong>{selectedIds.length} elemento{selectedIds.length !== 1 ? 's' : ''}</strong> de forma permanente.
               </p>
             </div>
             {bulkPwdError && <p className="text-red-400 text-sm">{bulkPwdError}</p>}
             <input type="password" value={bulkPwd} onChange={e => { setBulkPwd(e.target.value); setBulkPwdError(''); }}
-              placeholder="Contraseña master" autoFocus
+              placeholder="Contraseña" autoFocus
               onKeyDown={e => e.key === 'Enter' && handleBulkDelete()}
               className={`w-full px-4 py-2.5 border rounded-xl text-sm outline-none focus:ring-2 focus:ring-red-500 ${ds.inputDarkFilled}`} />
             <div className="flex gap-3">

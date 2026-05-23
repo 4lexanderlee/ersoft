@@ -8,15 +8,25 @@
 :root {
   --bg-primary: #b8afb5;
   --text-primary: #000000;
+  --bg-select-option: #ffffff;
+  --text-select-option: #111827;
 }
 
 html.dark {
   --bg-primary: #313b48;
   --text-primary: #ffffff;
+  --bg-select-option: #1f2937;
+  --text-select-option: #ffffff;
 }
 
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);
   /* The transition classes can be applied here for smooth theme switching */
+}
+
+/* Force standard dropdown select options to be readable and styled correctly per theme */
+select option, option {
+  background-color: var(--bg-select-option);
+  color: var(--text-select-option);
 }
