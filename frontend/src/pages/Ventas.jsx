@@ -70,10 +70,10 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const allowedAlmacenes = (almacenes || []).filter(w => isMaster || w.sucursalId === userSucursalId);
 
   const allowedLotes = lotes.filter(l => {
-    const almacenOfLote = almacenes.find(w => w.id === l.almacenId);
+    const almacenOfLote = almacenes.find(w => Number(w.id) === Number(l.almacenId));
     if (!almacenOfLote) return false;
     const matchesBranch = isMaster || almacenOfLote.sucursalId === userSucursalId;
-    const matchesAlmacen = !almacenFilter || l.almacenId === Number(almacenFilter);
+    const matchesAlmacen = !almacenFilter || Number(l.almacenId) === Number(almacenFilter);
     return matchesBranch && matchesAlmacen;
   });
 
@@ -106,12 +106,13 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     // Warehouse filtering
     let matchAlmacen = true;
     if (item._type === 'Producto') {
-      const lote = lotes.find(l => l.id === item.loteId);
+      // Use Number() coercion: loteId may be stored as string from <select>
+      const lote = lotes.find(l => Number(l.id) === Number(item.loteId));
       if (!lote) {
         matchAlmacen = false;
       } else {
-        const isAllowed = allowedAlmacenes.some(w => w.id === lote.almacenId);
-        matchAlmacen = isAllowed && (!almacenFilter || lote.almacenId === Number(almacenFilter));
+        const isAllowed = allowedAlmacenes.some(w => Number(w.id) === Number(lote.almacenId));
+        matchAlmacen = isAllowed && (!almacenFilter || Number(lote.almacenId) === Number(almacenFilter));
       }
     }
 
@@ -120,14 +121,21 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
 
   const allCats = [...new Set([...categorias.productos, ...categorias.servicios])];
 
-  const cartCount = cart.reduce((s, i) => s + i.qty, 0);
+  const cartCount = cart.reduce((s, i) => s + (i.item.unidadMedida === 'Kilogramo' ? 1 : i.qty), 0);
   const cartTotal = cart.reduce((s, i) => s + i.qty * parseFloat(i.item.precio || 0), 0);
 
   const getQty = (id) => cart.find(c => c.item.id === id)?.qty || 0;
-  const getMaxQty = (item) => item._type === 'Producto' ? (item.stock ?? 99) : 99;
+  // For kg products max is the float stock; for units it's integer stock or 99
+  const getMaxQty = (item) => {
+    if (item._type !== 'Producto') return 99;
+    return item.stock ?? 99;
+  };
 
   const setQty = (item, qty) => {
-    qty = Math.max(0, Math.min(qty, getMaxQty(item)));
+    const isKg = item.unidadMedida === 'Kilogramo';
+    const min = isKg ? 0 : 0;
+    qty = Math.max(min, Math.min(qty, getMaxQty(item)));
+    if (isKg) qty = Math.round(qty * 1000) / 1000; // round to 3 decimals
     setCart(prev => {
       const existing = prev.find(c => c.item.id === item.id);
       if (qty === 0) return prev.filter(c => c.item.id !== item.id);
@@ -139,20 +147,30 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const removeFromCart = (id) => setCart(prev => prev.filter(c => c.item.id !== id));
   const clearCart = () => { setCart([]); setRawInputs({}); };
 
-  // Fix 4: get display value for qty input (raw string if user is typing, else cart qty)
+  // get display value for qty input (raw string if user is typing, else cart qty)
   const getDisplayQty = (id) => {
     if (id in rawInputs) return rawInputs[id];
     return String(getQty(id));
   };
   const handleQtyInputChange = (item, val) => {
     setRawInputs(prev => ({ ...prev, [item.id]: val }));
-    const parsed = parseInt(val);
-    if (!isNaN(parsed) && parsed >= 0) setQty(item, parsed);
+    const isKg = item.unidadMedida === 'Kilogramo';
+    const parsed = isKg ? parseFloat(val) : parseInt(val);
+    if (isKg) {
+      // For kg: only update cart for positive values while typing
+      // If user types '0', '0.', '0.0' etc., keep existing cart value until blur
+      if (!isNaN(parsed) && parsed > 0) setQty(item, parsed);
+    } else {
+      if (!isNaN(parsed) && parsed >= 0) setQty(item, parsed);
+    }
   };
   const handleQtyInputBlur = (item) => {
     const raw = rawInputs[item.id];
     if (raw !== undefined) {
-      const val = Math.max(0, parseInt(raw) || 0);
+      const isKg = item.unidadMedida === 'Kilogramo';
+      // Use parseFloat for kg so '1.5' stays 1.5, not 1
+      const parsed = isKg ? parseFloat(raw) : parseInt(raw);
+      const val = Math.max(0, isNaN(parsed) ? 0 : parsed);
       setQty(item, val);
       setRawInputs(prev => { const n = { ...prev }; delete n[item.id]; return n; });
     }
@@ -308,18 +326,26 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                   const qty = getQty(item.id);
                   const maxQty = getMaxQty(item);
                   const isInCart = qty > 0;
+                  const isKgItem = item.unidadMedida === 'Kilogramo';
 
                   return (
                     <div key={item.id} className={`rounded-2xl border p-4 flex flex-col gap-2 ${cardBg}
                       ${isInCart ? (theme === 'dark' ? 'border-yellow-500/60' : 'border-yellow-400') : ''}`}>
-                      <p className={`text-xs font-bold uppercase tracking-wide ${isInCart ? 'text-yellow-500' : (theme === 'dark' ? 'text-gray-100' : 'text-gray-800')}`}>
-                        {item.nombre}
-                      </p>
+                      <div className="flex items-start justify-between gap-1">
+                        <p className={`text-xs font-bold uppercase tracking-wide ${isInCart ? 'text-yellow-500' : (theme === 'dark' ? 'text-gray-100' : 'text-gray-800')}`}>
+                          {item.nombre}
+                        </p>
+                        {item._type === 'Producto' && isKgItem && (
+                          <span className="text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-400/30 rounded-full px-1.5 py-0.5 shrink-0">⚖️ kg</span>
+                        )}
+                      </div>
                       {/* Image */}
-                      <div 
-                        onClick={() => setQty(item, getQty(item.id) + 1)}
-                        className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-80 transition-opacity ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}
-                        title="Haz clic para agregar rápido 1 unidad"
+                      <div
+                        onClick={() => { if (!isKgItem) setQty(item, getQty(item.id) + 1); }}
+                        className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden ${
+                          !isKgItem ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
+                        } transition-opacity ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}
+                        title={!isKgItem ? 'Haz clic para agregar rápido 1 unidad' : 'Ingresa el peso a vender abajo'}
                       >
                         {item.imagen
                           ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain pointer-events-none" />
@@ -327,47 +353,73 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                       </div>
                       {/* Price */}
                       <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                        Precio: S/. {parseFloat(item.precio || 0).toFixed(2)}
+                        S/. {parseFloat(item.precio || 0).toFixed(2)}{isKgItem ? ' /kg' : ''}
                       </p>
                       {item._type === 'Producto' && (
-                        <p className={`text-xs text-center ${item.stock <= 0 ? 'text-red-400' : (theme === 'dark' ? 'text-gray-500' : 'text-gray-400')}`}>
-                          Stock: {item.stock ?? 0}
+                        <p className={`text-xs text-center ${(item.stock ?? 0) <= 0 ? 'text-red-400' : (theme === 'dark' ? 'text-gray-500' : 'text-gray-400')}`}>
+                          {isKgItem
+                            ? `⚖️ ${parseFloat(item.stock ?? 0).toFixed(3)} kg disp.`
+                            : `Stock: ${item.stock ?? 0}`}
                         </p>
                       )}
-                      {/* Qty selector */}
-                      <div className="flex items-center justify-center gap-2 mt-1">
-                        <button
-                          onClick={() => setQty(item, getQty(item.id) - 1)}
-                          disabled={getQty(item.id) === 0}
-                          className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
-                            disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
-                          <FaMinus size={10} />
-                        </button>
-                        <input
-                          type="number"
-                          value={getDisplayQty(item.id)}
-                          onChange={e => handleQtyInputChange(item, e.target.value)}
-                          onBlur={() => handleQtyInputBlur(item)}
-                          min={0}
-                          max={maxQty}
-                          className={`w-16 text-center text-sm py-1 border rounded-full outline-none ${inputCls}`}
-                        />
-                        <button
-                          onClick={() => setQty(item, getQty(item.id) + 1)}
-                          disabled={item._type === 'Producto' && getQty(item.id) >= maxQty}
-                          className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
-                            disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
-                          <FaPlus size={10} />
-                        </button>
-                      </div>
+                      {/* Qty / weight selector */}
+                      {isKgItem ? (
+                        <div className="flex flex-col gap-1 mt-1">
+                          <div className={`flex items-center gap-1 px-2 py-1.5 border rounded-full ${inputCls}`}>
+                            <span className="text-xs text-gray-400 shrink-0">⚖️</span>
+                            <input
+                              type="number"
+                              value={getDisplayQty(item.id) === '0' ? '' : getDisplayQty(item.id)}
+                              onChange={e => handleQtyInputChange(item, e.target.value)}
+                              onBlur={() => handleQtyInputBlur(item)}
+                              min={0}
+                              max={maxQty}
+                              step="0.001"
+                              placeholder="0.000"
+                              className="flex-1 bg-transparent outline-none text-sm text-center"
+                            />
+                            <span className="text-xs text-gray-400 shrink-0">kg</span>
+                          </div>
+                          {isInCart && (
+                            <button onClick={() => removeFromCart(item.id)}
+                              className="text-[10px] text-red-400 hover:text-red-300 text-center transition-colors">
+                              Quitar
+                            </button>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-center gap-2 mt-1">
+                          <button
+                            onClick={() => setQty(item, getQty(item.id) - 1)}
+                            disabled={getQty(item.id) === 0}
+                            className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
+                              disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
+                            <FaMinus size={10} />
+                          </button>
+                          <input
+                            type="number"
+                            value={getDisplayQty(item.id)}
+                            onChange={e => handleQtyInputChange(item, e.target.value)}
+                            onBlur={() => handleQtyInputBlur(item)}
+                            min={0}
+                            max={maxQty}
+                            className={`w-16 text-center text-sm py-1 border rounded-full outline-none ${inputCls}`}
+                          />
+                          <button
+                            onClick={() => setQty(item, getQty(item.id) + 1)}
+                            disabled={item._type === 'Producto' && getQty(item.id) >= maxQty}
+                            className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
+                              disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
+                            <FaPlus size={10} />
+                          </button>
+                        </div>
+                      )}
                     </div>
                   );
                 })}
               </div>
             )}
           </div>
-
-
         </div>
 
         {/* Cart Side Panel */}
@@ -391,7 +443,9 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                       <div className="flex-1 min-w-0">
                         <p className={`text-xs font-bold uppercase truncate ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>{item.nombre}</p>
                         <p className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                          Cant. {qty} &nbsp; Total. S/. {(qty * parseFloat(item.precio || 0)).toFixed(2)}
+                          {item.unidadMedida === 'Kilogramo'
+                            ? `⚖️ ${parseFloat(qty).toFixed(3)} kg  Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`
+                            : `Cant. ${qty}  Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`}
                         </p>
                       </div>
                       <button onClick={() => removeFromCart(item.id)} className="ml-3 text-red-400 hover:text-red-500 transition-colors shrink-0">

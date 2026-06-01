@@ -1,13 +1,14 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../../context/ThemeContext';
-import { FaTimes, FaBoxOpen, FaTags, FaLayerGroup, FaFileImport, FaWarehouse } from 'react-icons/fa';
+import { FaTimes, FaBoxOpen, FaTags, FaLayerGroup, FaFileImport, FaWarehouse, FaClipboardList } from 'react-icons/fa';
 
 const ACTIONS = [
   { label: 'Agregar Producto o Servicio', icon: FaBoxOpen, key: 'add' },
   { label: 'Crear Categorías', icon: FaTags, key: 'categorias' },
   { label: 'Gestionar Almacenes', icon: FaWarehouse, key: 'almacenes' },
   { label: 'Crear Lotes', icon: FaLayerGroup, key: 'lotes' },
+  { label: 'Kardex', icon: FaClipboardList, key: 'kardex' },
   { label: 'Importar dataset (MASIVO)', icon: FaFileImport, key: 'importar' },
 ];
 
@@ -22,6 +23,7 @@ const ActionMenuPanel = ({ onClose, onSelect, activeTab }) => {
 
   const handleSelect = (key) => {
     if (key === 'lotes') { onClose(); navigate('/lotes'); return; }
+    if (key === 'kardex') { onClose(); navigate('/kardex'); return; }
     onSelect(key);
   };
 

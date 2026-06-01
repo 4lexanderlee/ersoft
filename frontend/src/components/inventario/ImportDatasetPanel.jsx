@@ -7,10 +7,10 @@ import { FaTimes, FaUpload, FaSearch, FaExclamationTriangle, FaCheckCircle } fro
 
 /**
  * Required columns and their indices (0-based):
- * 0: Lote | 1: Nombre | 2: Tipo | 3: Precio | 4: Costo | 5: Cod Barras | 6: Dsct
- * 7: Tipo Dsct | 8: Valor Dsct | 9: Vig Inicio | 10: Vig Fin | 11: categoría | 12: Imagen url | 13: Stock | 14: Descripción
+ * 0: Lote | 1: Almacen | 2: Nombre | 3: Tipo | 4: UM | 5: Precio | 6: Costo | 7: Cod Barras | 8: Dsct
+ * 9: Tipo Dsct | 10: Valor Dsct | 11: Vig Inicio | 12: Vig Fin | 13: categoría | 14: Imagen url | 15: Stock | 16: Descripción
  */
-const COLUMNS = ['Lote', 'Nombre', 'Tipo', 'Precio', 'Costo', 'Cod Barras', 'Dsct', 'Tipo Dsct', 'Valor Dsct', 'Vig Inicio', 'Vig Fin', 'categoría', 'Imagen url', 'Stock', 'Descripción'];
+const COLUMNS = ['Lote', 'Almacen', 'Nombre', 'Tipo', 'UM', 'Precio', 'Costo', 'Cod Barras', 'Dsct', 'Tipo Dsct', 'Valor Dsct', 'Vig Inicio', 'Vig Fin', 'categoría', 'Imagen url', 'Stock', 'Descripción'];
 const REQUIRED_FOR_PRODUCTO = ['Nombre', 'Tipo', 'Precio', 'Lote', 'Stock'];
 const REQUIRED_FOR_SERVICIO = ['Nombre', 'Tipo', 'Precio'];
 
@@ -78,6 +78,12 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
     errs.push(`Fila ${rowIndex}: Tipo inválido "${row['Tipo']}" (debe ser Producto o Servicio)`);
   }
 
+  // UM validation (optional field, defaults to 'Unidad')
+  const um = safeStr(row['UM']);
+  if (um !== '' && um !== 'Unidad' && um !== 'Kilogramo') {
+    errs.push(`Fila ${rowIndex}: UM inválido "${um}" (debe ser Unidad o Kilogramo)`);
+  }
+
   if (!safeStr(row['Nombre'])) errs.push(`Fila ${rowIndex}: Nombre es obligatorio`);
   if (!safeStr(row['Precio']) || isNaN(parseFloat(safeStr(row['Precio']))) || parseFloat(safeStr(row['Precio'])) < 0) {
     errs.push(`Fila ${rowIndex}: Precio inválido`);
@@ -93,8 +99,12 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
       if (!loteExists) errs.push(`Fila ${rowIndex}: Lote "${row['Lote']}" no existe o no está activo`);
     }
     const stock = safeStr(row['Stock']);
-    if (stock !== '' && (isNaN(parseInt(stock)) || parseInt(stock) < 0)) {
-      errs.push(`Fila ${rowIndex}: Stock debe ser un número positivo`);
+    const isKgRow = um === 'Kilogramo';
+    if (stock !== '') {
+      const stockNum = isKgRow ? parseFloat(stock) : parseInt(stock);
+      if (isNaN(stockNum) || stockNum < (isKgRow ? 0.001 : 0)) {
+        errs.push(`Fila ${rowIndex}: Stock debe ser un número positivo${isKgRow ? ' (kg, ej. 25.500)' : ''}`);
+      }
     }
   }
 
@@ -125,7 +135,7 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
 const ImportDatasetPanel = ({ onClose }) => {
   const { theme } = useTheme();
   const { login, user } = useAuth();
-  const { lotes, productos, bulkImport } = useInventario();
+  const { lotes, productos, almacenes, bulkImport } = useInventario();
 
   const [step, setStep] = useState('upload'); // 'upload' | 'preview'
   const [rows, setRows] = useState([]);
@@ -233,6 +243,17 @@ const ImportDatasetPanel = ({ onClose }) => {
       const lote = lotes.find(l => l.nombre.trim().toLowerCase() === safeStr(row['Lote']).toLowerCase() && l.estado === 'Activo');
       const cats = safeStr(row['categoría']) ? safeStr(row['categoría']).split(',').map(c => c.trim()).filter(Boolean).slice(0, 3) : [];
 
+      // Resolve Almacen by name (case-insensitive) — optional field
+      const almacenNombre = safeStr(row['Almacen']);
+      const resolvedAlmacen = almacenNombre
+        ? almacenes.find(a => a.nombre.trim().toLowerCase() === almacenNombre.toLowerCase())
+        : null;
+
+      // UM field (optional, defaults to 'Unidad')
+      const rawUM = safeStr(row['UM']);
+      const unidadMedida = rawUM === 'Kilogramo' ? 'Kilogramo' : 'Unidad';
+      const isKgRow = unidadMedida === 'Kilogramo';
+
       return {
         tipo,
         nombre: safeStr(row['Nombre']),
@@ -246,9 +267,13 @@ const ImportDatasetPanel = ({ onClose }) => {
         vigenciaHasta: parseExcelDate(row['Vig Fin']),
         categorias: cats,
         imagen: safeStr(row['Imagen url']) || null,
-        stock: tipo === 'Producto' ? (parseInt(safeStr(row['Stock'])) || 1) : undefined,
+        stock: tipo === 'Producto'
+          ? (isKgRow ? (parseFloat(safeStr(row['Stock'])) || 0.001) : (parseInt(safeStr(row['Stock'])) || 1))
+          : undefined,
+        unidadMedida,
         descripcion: safeStr(row['Descripción']) || '',
         loteId: lote?.id || null,
+        almacenId: resolvedAlmacen?.id || lote?.almacenId || null,
       };
     });
 

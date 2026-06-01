@@ -34,6 +34,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
         nombre: editItem.nombre || '',
         tipo: 'Producto',
         precio: editItem.precio || '',
+        unidadMedida: editItem.unidadMedida || 'Unidad',
         costo: editItem.costo || '0',
         codigoBarras: editItem.codigoBarras || '',
         imagen: editItem.imagen || null,
@@ -43,7 +44,7 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
         categorias: normCats(editItem),
       }
     : {
-        nombre: '', tipo: 'Producto', precio: '', costo: '0',
+        nombre: '', tipo: 'Producto', precio: '', unidadMedida: 'Unidad', costo: '0',
         codigoBarras: '',
         imagen: null, stock: '1', descripcion: '',
         loteId: activeLotes[0]?.id || '',
@@ -74,15 +75,20 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
     reader.readAsDataURL(file);
   };
 
-  // Stock handlers
+  // Stock handlers — support decimals for kg
+  const isKg = form.unidadMedida === 'Kilogramo';
   const handleStockChange = e => { setForm(prev => ({ ...prev, stock: e.target.value })); setStockError(''); };
   const handleStockBlur = () => {
-    const val = parseInt(form.stock);
-    if (isNaN(val) || val < 1) { setForm(prev => ({ ...prev, stock: '1' })); setStockError(''); }
+    const val = isKg ? parseFloat(form.stock) : parseInt(form.stock);
+    if (isNaN(val) || val < (isKg ? 0.001 : 1)) {
+      setForm(prev => ({ ...prev, stock: isKg ? '0.001' : '1' })); setStockError('');
+    }
   };
   const changeStock = delta => {
-    const next = Math.max(1, (parseInt(form.stock) || 0) + delta);
-    setForm(prev => ({ ...prev, stock: String(next) }));
+    const step = isKg ? 0.5 : 1;
+    const current = isKg ? (parseFloat(form.stock) || 0) : (parseInt(form.stock) || 0);
+    const next = Math.max(isKg ? 0.001 : 1, current + delta * step);
+    setForm(prev => ({ ...prev, stock: isKg ? next.toFixed(3) : String(next) }));
     setStockError('');
   };
 
@@ -114,8 +120,13 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
       }
     }
 
-    const stockNum = parseInt(form.stock);
-    if (isNaN(stockNum) || stockNum < 1) errs.stock = 'El stock debe ser al menos 1';
+    if (isKg) {
+      const stockNum = parseFloat(form.stock);
+      if (isNaN(stockNum) || stockNum < 0.001) errs.stock = 'El stock debe ser mayor a 0 kg';
+    } else {
+      const stockNum = parseInt(form.stock);
+      if (isNaN(stockNum) || stockNum < 1) errs.stock = 'El stock debe ser al menos 1 unidad';
+    }
 
     return errs;
   };
@@ -130,16 +141,19 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
 
   const handlePwdConfirm = () => {
     if (!verifyPassword(pwd)) { setPwdError('Contraseña incorrecta'); return; }
-    const stockNum = parseInt(form.stock);
+    const stockNum = isKg ? parseFloat(form.stock) : parseInt(form.stock);
     const payload = {
       ...form,
       precio: parseFloat(form.precio),
       costo: parseFloat(form.costo) || 0,
       stock: stockNum,
+      unidadMedida: form.unidadMedida,
+      loteId: Number(form.loteId),  // always save as Number
       codigoBarras: form.codigoBarras.trim() || null,
       // Remove legacy field if present
       categoria: undefined,
     };
+
     if (editItem) {
       updateProducto(editItem.id, payload);
     } else {
@@ -197,15 +211,29 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
             {errors.nombre && <p className="text-red-400 text-xs mt-1">{errors.nombre}</p>}
           </div>
 
-          {/* Precio */}
-          <div>
-            <label className={`text-xs font-semibold uppercase ${labelCls}`}>Precio <span className="text-red-500">*</span></label>
-            <div className="relative mt-1">
-              <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>S/.</span>
-              <input name="precio" type="number" step="0.01" value={form.precio} onChange={handleChange} placeholder="0.00"
-                className={`w-full pl-9 pr-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.precio ? 'border-red-500' : ''}`} />
+          {/* Precio + UM */}
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className={`text-xs font-semibold uppercase ${labelCls}`}>Precio <span className="text-red-500">*</span></label>
+              <div className="relative mt-1">
+                <span className={`absolute left-3 top-1/2 -translate-y-1/2 text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>S/.</span>
+                <input name="precio" type="number" step="0.01" value={form.precio} onChange={handleChange} placeholder="0.00"
+                  className={`w-full pl-9 pr-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls} ${errors.precio ? 'border-red-500' : ''}`} />
+              </div>
+              {errors.precio && <p className="text-red-400 text-xs mt-1">{errors.precio}</p>}
             </div>
-            {errors.precio && <p className="text-red-400 text-xs mt-1">{errors.precio}</p>}
+            <div>
+              <label className={`text-xs font-semibold uppercase ${labelCls}`}>UM</label>
+              <select
+                name="unidadMedida"
+                value={form.unidadMedida}
+                onChange={handleChange}
+                className={`w-full mt-1 px-3 py-2 border rounded-full text-sm focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`}
+              >
+                <option value="Unidad">📦 Unidad</option>
+                <option value="Kilogramo">⚖️ Kilogramo</option>
+              </select>
+            </div>
           </div>
 
           {/* Costo */}
@@ -299,21 +327,38 @@ const AddProductPanel = ({ onClose, editItem = null }) => {
           {/* Stock */}
           <div>
             <label className={`text-xs font-semibold uppercase ${labelCls}`}>
-              Stock <span className="text-red-500">*</span>
+              {isKg ? 'Stock (kg total)' : 'Stock'} <span className="text-red-500">*</span>
             </label>
+            {isKg && (
+              <p className={`text-[10px] mt-0.5 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
+                Ingresa el peso total disponible en kilogramos (ej. 25.500)
+              </p>
+            )}
             {(stockError || errors.stock) && <p className="text-red-400 text-xs mt-0.5">{stockError || errors.stock}</p>}
             <div className="flex items-center gap-3 mt-1">
               <button type="button" onClick={() => changeStock(-1)}
                 className={`w-8 h-8 rounded-full border flex items-center justify-center ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
                 <FaMinus size={10} />
               </button>
-              <input type="number" value={form.stock} onChange={handleStockChange} onBlur={handleStockBlur} min="1"
+              <input
+                type="number"
+                value={form.stock}
+                onChange={handleStockChange}
+                onBlur={handleStockBlur}
+                min={isKg ? '0.001' : '1'}
+                step={isKg ? '0.001' : '1'}
+                placeholder={isKg ? 'ej. 25.500' : '1'}
                 className={`flex-1 px-3 py-2 border rounded-full text-sm text-center focus:outline-none focus:ring-1 focus:ring-yellow-500 ${inputCls}`} />
               <button type="button" onClick={() => changeStock(1)}
                 className={`w-8 h-8 rounded-full border flex items-center justify-center ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
                 <FaPlus size={10} />
               </button>
             </div>
+            {isKg && (
+              <p className={`text-[10px] mt-1 text-center ${theme === 'dark' ? 'text-yellow-400' : 'text-yellow-600'}`}>
+                ⚖️ Stock total: {parseFloat(form.stock || 0).toFixed(3)} kg
+              </p>
+            )}
           </div>
 
           {/* Descripción */}

@@ -34,6 +34,9 @@ export const InventarioProvider = ({ children }) => {
   );
   const [almacenes, setAlmacenes] = useState(() => load('ersoft_almacenes', DEFAULT_ALMACENES));
 
+  // Kardex Historial
+  const [kardexHistorial, setKardexHistorial] = useState(() => load('ersoft_kardex_historial', []));
+
   // ── Producto CRUD ──────────────────────────────────────────────
   const addProducto = (p) => {
     const updated = [...productos, { ...p, id: Date.now() }];
@@ -273,6 +276,21 @@ export const InventarioProvider = ({ children }) => {
     }
   };
 
+  // ── Kardex CRUD ────────────────────────────────────────────────
+  const addKardexReport = (report) => {
+    const newReport = { ...report, id: Date.now() };
+    const updated = [newReport, ...kardexHistorial];
+    setKardexHistorial(updated); save('ersoft_kardex_historial', updated);
+  };
+  const updateKardexReport = (id, data) => {
+    const updated = kardexHistorial.map(k => k.id === id ? { ...k, ...data } : k);
+    setKardexHistorial(updated); save('ersoft_kardex_historial', updated);
+  };
+  const deleteKardexReport = (id) => {
+    const updated = kardexHistorial.filter(k => k.id !== id);
+    setKardexHistorial(updated); save('ersoft_kardex_historial', updated);
+  };
+
   return (
     <InventarioContext.Provider value={{
       productos, addProducto, updateProducto, deleteProducto, isBarcodeInUse,
@@ -282,6 +300,7 @@ export const InventarioProvider = ({ children }) => {
       categorias, addCategoria, removeCategoria,
       bulkImport,
       almacenes, addAlmacen, deleteAlmacen, refreshData,
+      kardexHistorial, addKardexReport, updateKardexReport, deleteKardexReport,
     }}>
       {children}
     </InventarioContext.Provider>

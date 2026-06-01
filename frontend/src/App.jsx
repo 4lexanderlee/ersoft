@@ -17,6 +17,7 @@ import Placeholder from './pages/Placeholder';
 import Promociones from './pages/Promociones';
 import Caja from './pages/Caja';
 import Calendario from './pages/Calendario';
+import Kardex from './pages/Kardex';
 
 // Empresa subpages
 import DatosUbi from './pages/empresa/DatosUbi';
@@ -153,6 +154,7 @@ function AppRoutes() {
         <Route path="ventas" element={<ModuleProtectedRoute moduleKey="ventas"><Ventas /></ModuleProtectedRoute>} />
         <Route path="tbf" element={<ModuleProtectedRoute moduleKey="tbf"><TBF /></ModuleProtectedRoute>} />
         <Route path="inventario" element={<ModuleProtectedRoute moduleKey="inventario"><Inventario /></ModuleProtectedRoute>} />
+        <Route path="kardex" element={<ModuleProtectedRoute moduleKey="inventario"><Kardex /></ModuleProtectedRoute>} />
         <Route path="lotes" element={<ModuleProtectedRoute moduleKey="lotes"><Lotes /></ModuleProtectedRoute>} />
         <Route path="promociones" element={<ModuleProtectedRoute moduleKey="promociones"><Promociones /></ModuleProtectedRoute>} />
         <Route path="caja" element={<ModuleProtectedRoute moduleKey="caja"><Caja /></ModuleProtectedRoute>} />
