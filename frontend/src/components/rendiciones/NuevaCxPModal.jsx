@@ -1,4 +1,5 @@
 import React, { useState, useMemo } from 'react';
+import { usePermission } from '../../hooks/usePermission';
 import { useDS } from '../../hooks/useDS';
 import { useAuth } from '../../context/AuthContext';
 import { useFinanzas } from '../../context/FinanzasContext';
@@ -10,21 +11,22 @@ import { loadSucursales, formatPEN, selectCls } from './rendicionesUtils';
 
 const METODOS_PAGO = ['Transferencia BCP', 'BBVA', 'Interbank', 'Efectivo', 'Yape / Plin', 'Depósito en cuenta', 'Cheque diferido'];
 
-const NuevaCxPModal = ({ isOpen, onClose, onSuccess }) => {
+const NuevaCxPModal = ({ isOpen, onClose, onSuccess, branchId = 'TODAS' }) => {
   const ds = useDS();
   const { user } = useAuth();
+  const { can, isGlobalScope, effectiveSucursalId } = usePermission();
   const { addCuenta } = useFinanzas();
   const sucursales = useMemo(() => loadSucursales(), []);
 
-  const todayStr = new Date().toISOString().split('T')[0];
-  const in30Days = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+  const [todayStr] = useState(() => new Date().toISOString().split('T')[0]);
+  const [in30Days] = useState(() => new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]);
 
   const [tipoDoc, setTipoDoc] = useState('RUC');
   const [numDoc, setNumDoc] = useState('');
   const [proveedorNombre, setProveedorNombre] = useState('');
   const [comprobanteRef, setComprobanteRef] = useState('');
   const [concepto, setConcepto] = useState('');
-  const [sucursalId, setSucursalId] = useState(user?.sucursalId ? String(user.sucursalId) : '1');
+  const [sucursalId, setSucursalId] = useState(String(effectiveSucursalId ?? (branchId !== 'TODAS' ? branchId : sucursales[0]?.id || '1')));
   const [montoTotal, setMontoTotal] = useState('');
   const [tieneCreditoFiscal, setTieneCreditoFiscal] = useState(true);
   const [fechaEmision, setFechaEmision] = useState(todayStr);
@@ -42,6 +44,7 @@ const NuevaCxPModal = ({ isOpen, onClose, onSuccess }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!can('tesoreria_cxp', 'CREAR') || (!isGlobalScope && String(sucursalId) !== String(effectiveSucursalId))) { setErrors({ general: 'Sin permiso para crear cuentas en esta sucursal.' }); return; }
     const newErrors = {};
 
     // Validate doc
@@ -110,32 +113,10 @@ const NuevaCxPModal = ({ isOpen, onClose, onSuccess }) => {
     };
 
     // 1. Guardar en FinanzasContext
-    const created = addCuenta(cuentaData);
+    let created;
+    try { created = addCuenta(cuentaData); } catch (error) { setErrors({ general: error.message }); return; }
 
-    // 2. Registrar evento de vencimiento en el calendario operativo
-    try {
-      const rawEvents = localStorage.getItem('ersoft_calendario_eventos');
-      const events = rawEvents ? JSON.parse(rawEvents) : [];
-      const newEvent = {
-        id: `ev-cxp-${created?.id || Date.now()}`,
-        title: `Vencimiento CxP · ${proveedorNombre.trim()}`,
-        date: fechaVencimiento,
-        startTime: '09:00',
-        endTime: '10:00',
-        allDay: true,
-        desc: `Vencimiento de pago de factura ${comprobanteRef.trim()} (${concepto.trim()}). Monto: S/ ${total.toFixed(2)}. Saldo pendiente: S/ ${saldoPendiente.toFixed(2)}`,
-        color: 'amber',
-        type: 'evento',
-        calType: 'sucursal',
-        sucursalId: String(sucursalId),
-        createdBy: user?.id,
-        createdByName: user?.name || 'Usuario'
-      };
-      localStorage.setItem('ersoft_calendario_eventos', JSON.stringify([...events, newEvent]));
-    } catch (err) {
-      console.error('[NuevaCxPModal] Error registrando en calendario:', err);
-    }
-
+    // Calendario deriva el vencimiento directamente de FinanzasContext.
     if (onSuccess) onSuccess(created);
     onClose();
   };
@@ -144,6 +125,7 @@ const NuevaCxPModal = ({ isOpen, onClose, onSuccess }) => {
     <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
       <form onSubmit={handleSubmit} noValidate className="w-full max-w-2xl max-h-[92vh] overflow-y-auto">
         <Card variant="raised" className="flex flex-col gap-4">
+          {errors.general && <p role="alert" className="text-red-400">{errors.general}</p>}
           <div className="flex items-center justify-between pb-3 border-b border-gray-200 dark:border-gray-700">
             <div>
               <h3 className={`font-black text-lg ${ds.text}`}>
@@ -223,10 +205,11 @@ const NuevaCxPModal = ({ isOpen, onClose, onSuccess }) => {
               <label className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Sucursal de Cargo</label>
               <select
                 value={sucursalId}
+                disabled={!isGlobalScope}
                 onChange={(e) => setSucursalId(e.target.value)}
                 className={selectCls(ds)}
               >
-                {sucursales.map(s => (
+                {sucursales.filter(s => isGlobalScope || String(s.id) === String(effectiveSucursalId)).map(s => (
                   <option key={s.id} value={String(s.id)}>{s.nombre}</option>
                 ))}
               </select>

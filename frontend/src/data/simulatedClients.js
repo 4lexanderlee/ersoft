@@ -1,5 +1,10 @@
 // This file simulates an initial database full of clients for the prototype
 
+export const CLIENT_SEGMENTS = {
+    VIP: 'amber', MAYORISTA: 'blue', FRECUENTE: 'teal', NUEVO: 'green',
+    CORPORATIVO: 'indigo', MOROSO_RIESGO: 'red', INACTIVO: 'gray', ESPECIAL_CAMPANA: 'amber',
+};
+
 export const simulatedClients = [
     // 10 DNIs
     { id: 1, docType: 'DNI', docNumber: '10000001', name: 'Juan', surname: 'Perez' },
@@ -36,4 +41,4 @@ export const simulatedClients = [
     { id: 28, docType: 'RUC', docNumber: '20600000008', name: 'Tecnologia H', surname: '' },
     { id: 29, docType: 'RUC', docNumber: '20600000009', name: 'Consultora I', surname: '' },
     { id: 30, docType: 'RUC', docNumber: '20600000010', name: 'Desarrollos J EIRL', surname: '' }
-];
+].map((client, index) => ({ ...client, segmento: Object.keys(CLIENT_SEGMENTS)[index % 8] }));

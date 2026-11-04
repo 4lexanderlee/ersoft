@@ -8,6 +8,8 @@ import { simulatedClients } from '../data/simulatedClients';
 import {
   FaArrowLeft, FaSearch, FaShoppingCart, FaTrash, FaImage,
   FaPlus, FaMinus, FaTimes, FaChevronDown, FaChevronUp,
+  FaLock, FaCashRegister, FaFire, FaLayerGroup, FaCheckCircle,
+  FaPaperPlane,
 } from 'react-icons/fa';
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
@@ -17,7 +19,20 @@ import { useFinanzas } from '../context/FinanzasContext';
 import { usePermission } from '../hooks/usePermission';
 import { useDS } from '../hooks/useDS';
 import { todayLima, getBranches } from '../utils/businessData';
-import { validateSale } from '../utils/saleRules';
+import {
+  validateSale,
+  validateQuoteForCRM,
+  calculateCreditSummary,
+  resolvePosAccessState,
+  allowsDecimals,
+  getUnitLabel,
+  hasProductVariants,
+  normalizeQty,
+  calcExactSubtotal,
+  ADELANTO_PAYMENT_METHODS,
+  ADELANTO_METHOD_TO_KEY,
+  TOP_DEMAND_LIMIT,
+} from '../utils/saleRules';
 import Card from '../components/ui/Card';
 import Input from '../components/ui/Input';
 import Btn from '../components/ui/Btn';
@@ -35,36 +50,261 @@ const DOC_TYPES = ['DNI', 'CE', 'RUC'];
 const SALE_TYPES = ['Ticket', 'Boleta', 'Factura', 'Cotizar'];
 
 /* ─────────────────────────────────────────────────────────────────
+   MODAL SELECTOR RÁPIDO DE VARIANTES (Talla / Color)
+───────────────────────────────────────────────────────────────── */
+const VariantSelectorModal = ({ product, cart, onAddVariant, onClose }) => {
+  const ds = useDS();
+  const variantes = Array.isArray(product?.variantes) ? product.variantes : [];
+  const tallas = product?.tallas?.length
+    ? product.tallas
+    : [...new Set(variantes.map((v) => v.talla).filter(Boolean))];
+  const colores = product?.colores?.length
+    ? product.colores
+    : [...new Set(variantes.map((v) => v.color).filter(Boolean))];
+
+  const firstAvailable = variantes.find((v) => Number(v.stock || 0) > 0) || variantes[0] || null;
+  const [selectedTalla, setSelectedTalla] = useState(firstAvailable?.talla || tallas[0] || '');
+  const [selectedColor, setSelectedColor] = useState(firstAvailable?.color || colores[0] || '');
+  const [qtyInput, setQtyInput] = useState('1');
+
+  if (!product) return null;
+
+  const isDec = allowsDecimals(product);
+  const unitLabel = getUnitLabel(product);
+
+  const getCartQtyForVariant = (varId) => {
+    const key = `${product.id}::${varId}`;
+    const found = cart.find((c) => (c.cartKey || String(c.item.id)) === key);
+    return found ? Number(found.qty || 0) : 0;
+  };
+
+  const selectedVariant = variantes.find(
+    (v) => String(v.talla) === String(selectedTalla) && String(v.color) === String(selectedColor)
+  ) || null;
+
+  const inCartQty = selectedVariant ? getCartQtyForVariant(selectedVariant.id) : 0;
+  const physicalStock = selectedVariant ? Number(selectedVariant.stock || 0) : 0;
+  const availableToAdd = Math.max(0, isDec ? Math.round((physicalStock - inCartQty) * 1000) / 1000 : physicalStock - inCartQty);
+  const unitPrice = Number(selectedVariant?.precio ?? product.precio ?? 0);
+  const parsedQty = normalizeQty(qtyInput, isDec);
+  const validQty = parsedQty > 0 && parsedQty <= availableToAdd;
+
+  const handleConfirm = () => {
+    if (!selectedVariant || !validQty) return;
+    onAddVariant(product, selectedVariant, parsedQty);
+    onClose();
+  };
+
+  return (
+    <div className={`fixed inset-0 ${ds.overlayBg} backdrop-blur-sm flex items-center justify-center z-50 p-4`}>
+      <Card variant="raised" padding="md" className={`w-full max-w-lg flex flex-col gap-4 max-h-[90vh] overflow-y-auto ${ds.text}`}>
+        <div className={`flex items-start justify-between gap-3 pb-3 border-b ${ds.divider}`}>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge color="indigo" dot>Selector de Variantes</Badge>
+              <span className={`text-xs font-semibold ${ds.muted}`}> S/. {unitPrice.toFixed(2)} / {unitLabel}</span>
+            </div>
+            <h3 className="font-bold text-base mt-1">{product.nombre}</h3>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Cerrar selector de variantes"
+            className={`p-1.5 rounded-lg hover:text-red-400 transition-colors ${ds.muted}`}
+          >
+            <FaTimes size={15} />
+          </button>
+        </div>
+
+        {/* Selector de Talla */}
+        {tallas.length > 0 && (
+          <div className="space-y-1.5">
+            <label className={`text-xs font-bold uppercase tracking-wider ${ds.muted}`}>1. Selecciona Talla</label>
+            <div className="flex flex-wrap gap-2">
+              {tallas.map((t) => {
+                const isSelected = String(selectedTalla) === String(t);
+                const totalTallaStock = variantes
+                  .filter((v) => String(v.talla) === String(t))
+                  .reduce((sum, v) => sum + Math.max(0, Number(v.stock || 0) - getCartQtyForVariant(v.id)), 0);
+                return (
+                  <button
+                    key={t}
+                    type="button"
+                    onClick={() => setSelectedTalla(t)}
+                    className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-yellow-500 text-black border-yellow-500 shadow-sm'
+                        : `${ds.cardFlat} ${ds.text} hover:border-yellow-500/50`
+                    } ${totalTallaStock <= 0 ? 'opacity-50' : ''}`}
+                  >
+                    Talla {t} <span className="text-[10px] opacity-80">({totalTallaStock})</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Selector de Color */}
+        {colores.length > 0 && (
+          <div className="space-y-1.5">
+            <label className={`text-xs font-bold uppercase tracking-wider ${ds.muted}`}>2. Selecciona Color</label>
+            <div className="flex flex-wrap gap-2">
+              {colores.map((c) => {
+                const isSelected = String(selectedColor) === String(c);
+                const matchingVar = variantes.find(
+                  (v) => String(v.talla) === String(selectedTalla) && String(v.color) === String(c)
+                );
+                const rem = matchingVar ? Math.max(0, Number(matchingVar.stock || 0) - getCartQtyForVariant(matchingVar.id)) : 0;
+                return (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSelectedColor(c)}
+                    className={`px-3.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
+                      isSelected
+                        ? 'bg-yellow-500 text-black border-yellow-500 shadow-sm'
+                        : `${ds.cardFlat} ${ds.text} hover:border-yellow-500/50`
+                    } ${rem <= 0 ? 'opacity-50' : ''}`}
+                  >
+                    {c} <span className="text-[10px] opacity-80">({rem} disp.)</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Tabla rápida de stock disponible por variante */}
+        <div className="space-y-1.5">
+          <span className={`text-xs font-bold uppercase tracking-wider ${ds.muted}`}>Disponibilidad por Variante (Talla / Color)</span>
+          <div className={`rounded-xl border overflow-hidden max-h-44 overflow-y-auto ${ds.divider}`}>
+            <table className="w-full text-xs">
+              <thead className={`${ds.cardFlat} border-b ${ds.divider}`}>
+                <tr>
+                  <th className="py-2 px-3 text-left">Talla</th>
+                  <th className="py-2 px-3 text-left">Color</th>
+                  <th className="py-2 px-3 text-left">SKU</th>
+                  <th className="py-2 px-3 text-right">Precio</th>
+                  <th className="py-2 px-3 text-right">Stock Disp.</th>
+                </tr>
+              </thead>
+              <tbody>
+                {variantes.map((v) => {
+                  const inCart = getCartQtyForVariant(v.id);
+                  const disp = Math.max(0, Number(v.stock || 0) - inCart);
+                  const isActive = selectedVariant?.id === v.id;
+                  return (
+                    <tr
+                      key={v.id}
+                      onClick={() => {
+                        setSelectedTalla(v.talla);
+                        setSelectedColor(v.color);
+                      }}
+                      className={`border-t cursor-pointer transition-colors ${ds.divider} ${
+                        isActive ? 'bg-yellow-500/15 font-bold' : 'hover:bg-yellow-500/5'
+                      }`}
+                    >
+                      <td className="py-2 px-3">{v.talla}</td>
+                      <td className="py-2 px-3">{v.color}</td>
+                      <td className={`py-2 px-3 font-mono text-[11px] ${ds.muted}`}>{v.sku || v.barcode || '—'}</td>
+                      <td className="py-2 px-3 text-right">S/. {Number(v.precio ?? product.precio ?? 0).toFixed(2)}</td>
+                      <td className="py-2 px-3 text-right">
+                        <Badge color={disp > 0 ? 'green' : 'red'} size="sm">
+                          {disp} {unitLabel}{inCart > 0 ? ` (${inCart} en carrito)` : ''}
+                        </Badge>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        {/* Resumen de variante seleccionada + cantidad */}
+        <div className={`rounded-xl border p-3 flex flex-wrap items-center justify-between gap-3 ${ds.cardFlat}`}>
+          <div>
+            <p className="text-xs font-bold">
+              {selectedVariant
+                ? `Variante: Talla ${selectedVariant.talla} · Color ${selectedVariant.color}`
+                : 'Combinación no disponible'}
+            </p>
+            <p className={`text-xs ${ds.muted}`}>
+              Stock disponible: <strong>{availableToAdd} {unitLabel}</strong>
+              {inCartQty > 0 ? ` (En carrito: ${inCartQty})` : ''}
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <Input
+              aria-label="Cantidad variante"
+              type="number"
+              size="sm"
+              min={isDec ? '0.001' : '1'}
+              max={availableToAdd}
+              step={isDec ? '0.001' : '1'}
+              value={qtyInput}
+              onChange={(e) => setQtyInput(e.target.value)}
+              className="w-24 text-center"
+            />
+            <span className="text-xs font-bold">
+              Subtotal: S/. {calcExactSubtotal(validQty ? parsedQty : 0, unitPrice).toFixed(2)}
+            </span>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2 pt-1">
+          <Btn type="button" variant="secondary" onClick={onClose}>Cancelar</Btn>
+          <Btn
+            type="button"
+            variant="primary"
+            disabled={!selectedVariant || !validQty}
+            onClick={handleConfirm}
+          >
+            Agregar al Carrito
+          </Btn>
+        </div>
+      </Card>
+    </div>
+  );
+};
+
+/* ─────────────────────────────────────────────────────────────────
    STEP 1 – Product selection + cart
 ───────────────────────────────────────────────────────────────── */
 const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSucursalChange, crmPreloadInfo }) => {
+  const ds = useDS();
   const { isGlobalScope } = usePermission();
   const navigate = useNavigate();
-  const { productos, servicios, categorias, lotes, almacenes, refreshData } = useInventario();
+  const { productos, servicios, categorias, arbolCategorias = [], lotes, almacenes, refreshData } = useInventario();
 
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [searchText, setSearchText] = useState('');
+  const [familiaFilter, setFamiliaFilter] = useState('');
   const [catFilter, setCatFilter] = useState('');
   const [loteFilter, setLoteFilter] = useState('');
   const [almacenFilter, setAlmacenFilter] = useState('');
+  const [currentPage, setCurrentPage] = useState(1);
 
   const [showTypeMenu, setShowTypeMenu] = useState(false);
+  const [showFamiliaMenu, setShowFamiliaMenu] = useState(false);
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showLoteMenu, setShowLoteMenu] = useState(false);
   const [showAlmacenMenu, setShowAlmacenMenu] = useState(false);
   const [showCart, setShowCart] = useState(() => cart.length > 0);
-  // Fix 4: raw input values map (allows empty string while typing)
   const [rawInputs, setRawInputs] = useState({});
+  const [variantModalProduct, setVariantModalProduct] = useState(null);
 
   const typeRef = useRef(null);
+  const familiaRef = useRef(null);
   const catRef = useRef(null);
   const loteRef = useRef(null);
   const almacenRef = useRef(null);
 
-  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e) => {
       if (typeRef.current && !typeRef.current.contains(e.target)) setShowTypeMenu(false);
+      if (familiaRef.current && !familiaRef.current.contains(e.target)) setShowFamiliaMenu(false);
       if (catRef.current && !catRef.current.contains(e.target)) setShowCatMenu(false);
       if (loteRef.current && !loteRef.current.contains(e.target)) setShowLoteMenu(false);
       if (almacenRef.current && !almacenRef.current.contains(e.target)) setShowAlmacenMenu(false);
@@ -73,7 +313,6 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const isMaster = false; // A POS sale belongs to exactly one branch, including for MASTER.
   const userSucursalId = String(sucursalId);
   const allowedAlmacenes = (almacenes || []).filter(w => String(w.sucursalId) === userSucursalId);
 
@@ -85,36 +324,51 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
     return matchesBranch && matchesAlmacen;
   });
 
-  // Filter services by branch if not Master
-  const visibleServicios = servicios.filter(s => {
-    if (isMaster) return true;
-    return String(s.sucursalId) === String(userSucursalId);
-  });
+  const visibleServicios = servicios.filter(s => String(s.sucursalId) === String(userSucursalId));
 
-  // Combine products + services
   const allItems = [
     ...productos.map(p => ({ ...p, _type: 'Producto' })),
     ...visibleServicios.map(s => ({ ...s, _type: 'Servicio' })),
   ];
 
+  const allFamilias = [
+    ...new Set([
+      ...(arbolCategorias || []).map(f => f.nombre).filter(Boolean),
+      ...productos.map(p => p.familia).filter(Boolean),
+    ]),
+  ];
+
+  const selectedFamiliaNode = (arbolCategorias || []).find(f => f.nombre === familiaFilter);
+  const allCats = familiaFilter && selectedFamiliaNode
+    ? [...new Set((selectedFamiliaNode.categorias || []).map(c => c.nombre))]
+    : [...new Set([...(categorias?.productos || []), ...(categorias?.servicios || [])])];
+
+  const qRaw = searchText.trim();
+  const q = qRaw.toLowerCase();
+  const isSearchAndFilterEmpty = !qRaw && !familiaFilter && !catFilter && !loteFilter && !almacenFilter && typeFilter === 'Todos';
+
   const filtered = allItems.filter(item => {
     const matchType = typeFilter === 'Todos'
       || (typeFilter === 'Productos' && item._type === 'Producto')
       || (typeFilter === 'Servicios' && item._type === 'Servicio');
-    const q = searchText.toLowerCase();
-    const matchSearch = !searchText
-      || item.nombre.toLowerCase().includes(q)
-      // Also match by barcode (exact match or starts-with for scanning)
-      || (item.codigoBarras && item.codigoBarras.includes(searchText));
-    // Support multi-category array
+
+    const matchVariantSearch = Array.isArray(item.variantes) && item.variantes.some(
+      v => (v.barcode && String(v.barcode).toLowerCase().includes(q))
+        || (v.sku && String(v.sku).toLowerCase().includes(q))
+    );
+    const matchSearch = !qRaw
+      || (item.nombre && item.nombre.toLowerCase().includes(q))
+      || (item.codigoBarras && String(item.codigoBarras).toLowerCase().includes(q))
+      || (item.sku && String(item.sku).toLowerCase().includes(q))
+      || matchVariantSearch;
+
     const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
-    const matchCat = !catFilter || itemCats.includes(catFilter);
+    const matchFamilia = !familiaFilter || item.familia === familiaFilter || itemCats.includes(familiaFilter);
+    const matchCat = !catFilter || item.categoria === catFilter || itemCats.includes(catFilter);
     const matchLote = !loteFilter || (item._type === 'Producto' && Number(item.loteId) === Number(loteFilter));
-    
-    // Warehouse filtering
+
     let matchAlmacen = true;
     if (item._type === 'Producto') {
-      // Use Number() coercion: loteId may be stored as string from <select>
       const lote = lotes.find(l => Number(l.id) === Number(item.loteId));
       if (!lote) {
         matchAlmacen = false;
@@ -124,63 +378,129 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
       }
     }
 
-    return matchType && matchSearch && matchCat && matchLote && matchAlmacen;
+    return matchType && matchSearch && matchFamilia && matchCat && matchLote && matchAlmacen;
   });
 
-  const allCats = [...new Set([...categorias.productos, ...categorias.servicios])];
+  // Sort by ventas_acumuladas descending (boost exact barcode match when searching)
+  const sortedItems = [...filtered].sort((a, b) => {
+    if (qRaw) {
+      const aExact = String(a.codigoBarras || '') === qRaw || (a.variantes || []).some(v => String(v.barcode || '') === qRaw);
+      const bExact = String(b.codigoBarras || '') === qRaw || (b.variantes || []).some(v => String(v.barcode || '') === qRaw);
+      if (aExact && !bExact) return -1;
+      if (!aExact && bExact) return 1;
+    }
+    return (Number(b.ventas_acumuladas) || 0) - (Number(a.ventas_acumuladas) || 0);
+  });
 
-  const cartCount = cart.reduce((s, i) => s + (i.item.unidadMedida === 'Kilogramo' ? 1 : i.qty), 0);
-  const cartTotal = cart.reduce((s, i) => s + i.qty * parseFloat(i.item.precio || 0), 0);
+  const totalPages = isSearchAndFilterEmpty
+    ? 1
+    : Math.max(1, Math.ceil(sortedItems.length / TOP_DEMAND_LIMIT));
+  const safePage = Math.min(currentPage, totalPages);
+  const displayedItems = isSearchAndFilterEmpty
+    ? sortedItems.slice(0, TOP_DEMAND_LIMIT)
+    : sortedItems.slice((safePage - 1) * TOP_DEMAND_LIMIT, safePage * TOP_DEMAND_LIMIT);
 
-  const getQty = (id) => cart.find(c => c.item.id === id)?.qty || 0;
-  // For kg products max is the float stock; for units it's integer stock or 99
+  const getLineKey = (line) => line.cartKey || String(line.item.id);
+
+  const cartCount = cart.reduce((s, i) => s + (allowsDecimals(i.item) ? 1 : Number(i.qty || 0)), 0);
+  const cartTotal = Number(cart.reduce((s, i) => s + calcExactSubtotal(i.qty, i.item.precio), 0).toFixed(2));
+
+  const getQty = (key) => cart.find(c => getLineKey(c) === String(key))?.qty || 0;
+  const getParentCartQty = (parentId) => cart
+    .filter(c => String(c.item.parentProductId ?? c.item.id) === String(parentId))
+    .reduce((sum, c) => sum + Number(c.qty || 0), 0);
+
   const getMaxQty = (item) => {
-    if (item._type !== 'Producto') return 99;
-    return item.stock ?? 99;
+    if (item._type !== 'Producto') return 999;
+    return Number(item.stock ?? 999);
   };
 
-  const setQty = (item, qty) => {
-    const isKg = item.unidadMedida === 'Kilogramo';
-    const min = isKg ? 0 : 0;
-    qty = Math.max(min, Math.min(qty, getMaxQty(item)));
-    if (isKg) qty = Math.round(qty * 1000) / 1000; // round to 3 decimals
+  const setQtyByKey = (item, rawQty, customKey = null) => {
+    const key = customKey || String(item.id);
+    const isDec = allowsDecimals(item);
+    const max = getMaxQty(item);
+    let qty = Math.max(0, Math.min(Number(rawQty) || 0, max));
+    qty = isDec ? Math.round(qty * 1000) / 1000 : Math.trunc(qty);
+
     setCart(prev => {
-      const existing = prev.find(c => c.item.id === item.id);
-      if (qty === 0) return prev.filter(c => c.item.id !== item.id);
-      if (existing) return prev.map(c => c.item.id === item.id ? { ...c, qty } : c);
-      return [...prev, { item, qty }];
+      const existing = prev.find(c => getLineKey(c) === key);
+      if (qty <= 0) return prev.filter(c => getLineKey(c) !== key);
+      if (existing) return prev.map(c => getLineKey(c) === key ? { ...c, qty } : c);
+      return [...prev, { cartKey: key, item, qty }];
     });
   };
 
-  const removeFromCart = (id) => setCart(prev => prev.filter(c => c.item.id !== id));
+  const handleAddVariantToCart = (parentProduct, variant, addQty) => {
+    const key = `${parentProduct.id}::${variant.id}`;
+    const isDec = allowsDecimals(parentProduct);
+    const maxVarStock = Number(variant.stock || 0);
+    const currentInCart = getQty(key);
+    const nextQty = Math.min(
+      maxVarStock,
+      isDec ? Math.round((currentInCart + addQty) * 1000) / 1000 : Math.trunc(currentInCart + addQty)
+    );
+    if (nextQty <= 0) return;
+
+    const variantCartItem = {
+      ...parentProduct,
+      id: key,
+      parentProductId: parentProduct.id,
+      varianteId: variant.id,
+      varianteTalla: variant.talla,
+      varianteColor: variant.color,
+      varianteSku: variant.sku || variant.barcode || parentProduct.codigoBarras,
+      nombre: `${parentProduct.nombre} (Talla ${variant.talla} / ${variant.color})`,
+      nombreBase: parentProduct.nombre,
+      precio: Number(variant.precio ?? parentProduct.precio ?? 0),
+      costo: Number(variant.costo ?? parentProduct.costo ?? 0),
+      stock: maxVarStock,
+      loteId: variant.loteId ?? parentProduct.loteId,
+      _type: 'Producto',
+      variantes: [], // Cart line represents a specific resolved child variant
+    };
+
+    setQtyByKey(variantCartItem, nextQty, key);
+    setShowCart(true);
+  };
+
+  const removeFromCart = (key) => {
+    const strKey = String(key);
+    setCart(prev => prev.filter(c => getLineKey(c) !== strKey));
+    setRawInputs(prev => {
+      const next = { ...prev };
+      delete next[strKey];
+      return next;
+    });
+  };
   const clearCart = () => { setCart([]); setRawInputs({}); };
 
-  // get display value for qty input (raw string if user is typing, else cart qty)
-  const getDisplayQty = (id) => {
-    if (id in rawInputs) return rawInputs[id];
-    return String(getQty(id));
+  const getDisplayQty = (key) => {
+    const strKey = String(key);
+    if (strKey in rawInputs) return rawInputs[strKey];
+    return String(getQty(strKey));
   };
-  const handleQtyInputChange = (item, val) => {
-    setRawInputs(prev => ({ ...prev, [item.id]: val }));
-    const isKg = item.unidadMedida === 'Kilogramo';
-    const parsed = isKg ? parseFloat(val) : parseInt(val);
-    if (isKg) {
-      // For kg: only update cart for positive values while typing
-      // If user types '0', '0.', '0.0' etc., keep existing cart value until blur
-      if (!isNaN(parsed) && parsed > 0) setQty(item, parsed);
+
+  const handleQtyInputChange = (item, val, customKey = null) => {
+    const key = String(customKey || item.id);
+    setRawInputs(prev => ({ ...prev, [key]: val }));
+    const isDec = allowsDecimals(item);
+    const parsed = isDec ? parseFloat(val) : parseInt(val, 10);
+    if (isDec) {
+      if (!isNaN(parsed) && parsed > 0) setQtyByKey(item, parsed, key);
     } else {
-      if (!isNaN(parsed) && parsed >= 0) setQty(item, parsed);
+      if (!isNaN(parsed) && parsed >= 0) setQtyByKey(item, parsed, key);
     }
   };
-  const handleQtyInputBlur = (item) => {
-    const raw = rawInputs[item.id];
+
+  const handleQtyInputBlur = (item, customKey = null) => {
+    const key = String(customKey || item.id);
+    const raw = rawInputs[key];
     if (raw !== undefined) {
-      const isKg = item.unidadMedida === 'Kilogramo';
-      // Use parseFloat for kg so '1.5' stays 1.5, not 1
-      const parsed = isKg ? parseFloat(raw) : parseInt(raw);
+      const isDec = allowsDecimals(item);
+      const parsed = isDec ? parseFloat(raw) : parseInt(raw, 10);
       const val = Math.max(0, isNaN(parsed) ? 0 : parsed);
-      setQty(item, val);
-      setRawInputs(prev => { const n = { ...prev }; delete n[item.id]; return n; });
+      setQtyByKey(item, val, key);
+      setRawInputs(prev => { const n = { ...prev }; delete n[key]; return n; });
     }
   };
 
@@ -197,12 +517,20 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
         right={
           <>
             {crmPreloadInfo && (
-              <Badge color="purple" dot>
+              <Badge color="indigo" dot>
                 CRM: {crmPreloadInfo.oportunidadId}
               </Badge>
             )}
-            <Input as="select" aria-label="Sucursal POS" value={sucursalId} disabled={!isGlobalScope || cart.length > 0} onChange={e => onSucursalChange(e.target.value)}>
-              {getBranches().filter(b => isGlobalScope || String(b.id) === String(sucursalId)).map(b => <option key={b.id} value={b.id}>{b.nombre || b.nombreComercial}</option>)}
+            <Input
+              as="select"
+              aria-label="Sucursal POS"
+              value={sucursalId}
+              disabled={!isGlobalScope || cart.length > 0}
+              onChange={e => { onSucursalChange(e.target.value); setCurrentPage(1); }}
+            >
+              {getBranches().filter(b => isGlobalScope || String(b.id) === String(sucursalId)).map(b => (
+                <option key={b.id} value={b.id}>{b.nombre || b.nombreComercial}</option>
+              ))}
             </Input>
             <RefreshButton onRefresh={refreshData} />
           </>
@@ -214,10 +542,11 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
         {/* Products area */}
         <div className="flex-1 flex flex-col min-h-0 overflow-hidden">
           {/* Search & Filter Bar */}
-          <div className="flex items-center gap-3 px-6 py-4 flex-wrap">
+          <div className="flex items-center gap-2.5 px-6 pt-4 pb-2 flex-wrap">
             {/* Tipo dropdown */}
             <div ref={typeRef} className="relative">
               <button
+                type="button"
                 onClick={() => setShowTypeMenu(!showTypeMenu)}
                 className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium min-w-[100px] ${inputCls}`}
               >
@@ -226,9 +555,13 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
               {showTypeMenu && (
                 <div className={`absolute top-full left-0 mt-1 w-36 rounded-2xl border shadow-xl z-30 py-1 ${dropBg}`}>
                   {['Productos', 'Servicios', 'Todos'].map(t => (
-                    <button key={t} onClick={() => { setTypeFilter(t); setShowTypeMenu(false); }}
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => { setTypeFilter(t); setCurrentPage(1); setShowTypeMenu(false); }}
                       className={`w-full text-left px-4 py-2 text-sm hover:bg-yellow-500/10 transition-colors
-                        ${typeFilter === t ? 'font-bold text-yellow-500' : ''}`}>
+                        ${typeFilter === t ? 'font-bold text-yellow-500' : ''}`}
+                    >
                       {t}
                     </button>
                   ))}
@@ -237,31 +570,87 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
             </div>
 
             {/* Search */}
-            <div className={`flex items-center flex-1 gap-2 px-4 py-2 border rounded-full ${inputCls}`}>
+            <div className={`flex items-center flex-1 min-w-[220px] gap-2 px-4 py-2 border rounded-full ${inputCls}`}>
               <FaSearch className="text-gray-400" size={14} />
               <input
                 value={searchText}
-                onChange={e => setSearchText(e.target.value)}
-                placeholder="Buscar por nombre de producto o servicio..."
+                onChange={e => { setSearchText(e.target.value); setCurrentPage(1); }}
+                placeholder="Buscar por nombre, SKU o código de barras..."
                 className="flex-1 bg-transparent outline-none text-sm"
               />
+              {searchText && (
+                <button
+                  type="button"
+                  onClick={() => { setSearchText(''); setCurrentPage(1); }}
+                  aria-label="Limpiar búsqueda"
+                  className="text-gray-400 hover:text-red-400"
+                >
+                  <FaTimes size={12} />
+                </button>
+              )}
             </div>
 
+            {/* Familia filter */}
+            {allFamilias.length > 0 && (
+              <div ref={familiaRef} className="relative z-20">
+                <button
+                  type="button"
+                  onClick={() => setShowFamiliaMenu(!showFamiliaMenu)}
+                  className={`flex items-center gap-2 px-3.5 py-2 border rounded-full text-xs font-semibold ${inputCls} hover:border-yellow-500 transition-colors`}
+                >
+                  {familiaFilter || 'Familia'} {showFamiliaMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
+                </button>
+                {showFamiliaMenu && (
+                  <div className={`absolute top-full right-0 mt-1 w-48 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
+                    <button
+                      type="button"
+                      onClick={() => { setFamiliaFilter(''); setCatFilter(''); setCurrentPage(1); setShowFamiliaMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!familiaFilter ? 'font-bold text-yellow-500' : ''}`}
+                    >
+                      Todas las Familias
+                    </button>
+                    {allFamilias.map(fam => (
+                      <button
+                        key={fam}
+                        type="button"
+                        onClick={() => { setFamiliaFilter(fam); setCatFilter(''); setCurrentPage(1); setShowFamiliaMenu(false); }}
+                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${familiaFilter === fam ? 'font-bold text-yellow-500' : ''}`}
+                      >
+                        {fam}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Category filter */}
-            <div ref={catRef} className="relative">
-              <button onClick={() => setShowCatMenu(!showCatMenu)}
-                className={`p-2.5 rounded-full border ${inputCls} hover:border-yellow-500 transition-colors`}>
-                <MdTune size={18} />
+            <div ref={catRef} className="relative z-20">
+              <button
+                type="button"
+                onClick={() => setShowCatMenu(!showCatMenu)}
+                title="Filtrar por Categoría"
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-full border text-xs font-semibold ${inputCls} hover:border-yellow-500 transition-colors`}
+              >
+                <MdTune size={16} />
+                <span>{catFilter || 'Categoría'}</span>
               </button>
               {showCatMenu && allCats.length > 0 && (
-                <div className={`absolute top-full right-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
-                  <button onClick={() => { setCatFilter(''); setShowCatMenu(false); }}
-                    className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!catFilter ? 'font-bold text-yellow-500' : ''}`}>
-                    Todas
+                <div className={`absolute top-full right-0 mt-1 w-48 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
+                  <button
+                    type="button"
+                    onClick={() => { setCatFilter(''); setCurrentPage(1); setShowCatMenu(false); }}
+                    className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!catFilter ? 'font-bold text-yellow-500' : ''}`}
+                  >
+                    Todas las Categorías
                   </button>
                   {allCats.map(c => (
-                    <button key={c} onClick={() => { setCatFilter(c); setShowCatMenu(false); }}
-                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${catFilter === c ? 'font-bold text-yellow-500' : ''}`}>
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => { setCatFilter(c); setCurrentPage(1); setShowCatMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${catFilter === c ? 'font-bold text-yellow-500' : ''}`}
+                    >
                       {c}
                     </button>
                   ))}
@@ -272,19 +661,29 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
             {/* Almacén filter */}
             {typeFilter !== 'Servicios' && allowedAlmacenes.length > 0 && (
               <div ref={almacenRef} className="relative z-20">
-                <button onClick={() => setShowAlmacenMenu(!showAlmacenMenu)}
-                  className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium ${inputCls} hover:border-yellow-500 transition-colors`}>
+                <button
+                  type="button"
+                  onClick={() => setShowAlmacenMenu(!showAlmacenMenu)}
+                  className={`flex items-center gap-2 px-3.5 py-2 border rounded-full text-xs font-semibold ${inputCls} hover:border-yellow-500 transition-colors`}
+                >
                   {almacenFilter ? (allowedAlmacenes.find(w => w.id === Number(almacenFilter))?.nombre || 'Almacén') : 'Todos los Almacenes'} {showAlmacenMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
                 </button>
                 {showAlmacenMenu && (
-                  <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
-                    <button onClick={() => { setAlmacenFilter(''); setLoteFilter(''); setShowAlmacenMenu(false); }}
-                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!almacenFilter ? 'font-bold text-yellow-500' : ''}`}>
+                  <div className={`absolute top-full left-0 mt-1 w-48 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
+                    <button
+                      type="button"
+                      onClick={() => { setAlmacenFilter(''); setLoteFilter(''); setCurrentPage(1); setShowAlmacenMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!almacenFilter ? 'font-bold text-yellow-500' : ''}`}
+                    >
                       Todos los Almacenes
                     </button>
                     {allowedAlmacenes.map(w => (
-                      <button key={w.id} onClick={() => { setAlmacenFilter(w.id); setLoteFilter(''); setShowAlmacenMenu(false); }}
-                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${almacenFilter === w.id ? 'font-bold text-yellow-500' : ''}`}>
+                      <button
+                        key={w.id}
+                        type="button"
+                        onClick={() => { setAlmacenFilter(w.id); setLoteFilter(''); setCurrentPage(1); setShowAlmacenMenu(false); }}
+                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${almacenFilter === w.id ? 'font-bold text-yellow-500' : ''}`}
+                      >
                         {w.nombre}
                       </button>
                     ))}
@@ -296,19 +695,29 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
             {/* Lote filter */}
             {typeFilter !== 'Servicios' && allowedLotes.length > 0 && (
               <div ref={loteRef} className="relative z-20">
-                <button onClick={() => setShowLoteMenu(!showLoteMenu)}
-                  className={`flex items-center gap-2 px-4 py-2 border rounded-full text-sm font-medium ${inputCls} hover:border-yellow-500 transition-colors`}>
+                <button
+                  type="button"
+                  onClick={() => setShowLoteMenu(!showLoteMenu)}
+                  className={`flex items-center gap-2 px-3.5 py-2 border rounded-full text-xs font-semibold ${inputCls} hover:border-yellow-500 transition-colors`}
+                >
                   {loteFilter ? (allowedLotes.find(l => l.id === Number(loteFilter))?.nombre || 'Lote') : 'Todos los Lotes'} {showLoteMenu ? <FaChevronUp size={10} /> : <FaChevronDown size={10} />}
                 </button>
                 {showLoteMenu && (
                   <div className={`absolute top-full left-0 mt-1 w-44 rounded-2xl border shadow-xl z-30 py-2 ${dropBg}`}>
-                    <button onClick={() => { setLoteFilter(''); setShowLoteMenu(false); }}
-                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!loteFilter ? 'font-bold text-yellow-500' : ''}`}>
+                    <button
+                      type="button"
+                      onClick={() => { setLoteFilter(''); setCurrentPage(1); setShowLoteMenu(false); }}
+                      className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${!loteFilter ? 'font-bold text-yellow-500' : ''}`}
+                    >
                       Todos los Lotes
                     </button>
                     {allowedLotes.map(l => (
-                      <button key={l.id} onClick={() => { setLoteFilter(l.id); setShowLoteMenu(false); }}
-                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${loteFilter === l.id ? 'font-bold text-yellow-500' : ''}`}>
+                      <button
+                        key={l.id}
+                        type="button"
+                        onClick={() => { setLoteFilter(l.id); setCurrentPage(1); setShowLoteMenu(false); }}
+                        className={`w-full text-left px-4 py-1.5 text-sm hover:bg-yellow-500/10 ${loteFilter === l.id ? 'font-bold text-yellow-500' : ''}`}
+                      >
                         {l.nombre}
                       </button>
                     ))}
@@ -319,124 +728,245 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
 
             {/* Cart icon */}
             <div className="relative">
-              <button onClick={() => setShowCart(!showCart)}
-                className={`p-2.5 rounded-full border ${inputCls} hover:border-yellow-500 transition-colors`}>
+              <button
+                type="button"
+                onClick={() => setShowCart(!showCart)}
+                aria-label="Abrir carrito de ventas"
+                className={`p-2.5 rounded-full border ${inputCls} hover:border-yellow-500 transition-colors`}
+              >
                 <FaShoppingCart size={18} />
               </button>
               {cartCount > 0 && (
-                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                <span className="absolute -top-1.5 -right-1.5 min-w-5 h-5 px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
                   {cartCount}
                 </span>
               )}
             </div>
           </div>
 
+          {/* Info Bar: Top 25 Mayor Demanda / Resultados limitados a 25 */}
+          <div className="flex items-center justify-between px-6 pb-3 gap-2 flex-wrap">
+            {isSearchAndFilterEmpty ? (
+              <div className="flex items-center gap-2">
+                <Badge color="amber" dot>Top {TOP_DEMAND_LIMIT} Mayor Demanda</Badge>
+                <span className={`text-xs ${ds.muted}`}>
+                  Productos y servicios de alta rotación ({displayedItems.length} de {sortedItems.length})
+                </span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-2">
+                <Badge color="blue" dot>Resultados Filtrados</Badge>
+                <span className={`text-xs ${ds.muted}`}>
+                  Mostrando {displayedItems.length} de {sortedItems.length} registros (máx. {TOP_DEMAND_LIMIT} por página)
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* Product Grid */}
           <div className="flex-1 overflow-y-auto px-6 pb-20">
-            {filtered.length === 0 ? (
+            {displayedItems.length === 0 ? (
               <div className="flex items-center justify-center h-48">
                 <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                   No se encontraron productos o servicios.
                 </p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {filtered.map(item => {
-                  const qty = getQty(item.id);
-                  const maxQty = getMaxQty(item);
-                  const isInCart = qty > 0;
-                  const isKgItem = item.unidadMedida === 'Kilogramo';
+              <>
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {displayedItems.map(item => {
+                    const isVarProduct = hasProductVariants(item);
+                    const isDecItem = allowsDecimals(item);
+                    const unitLbl = getUnitLabel(item);
+                    const qty = isVarProduct ? getParentCartQty(item.id) : getQty(item.id);
+                    const maxQty = getMaxQty(item);
+                    const isInCart = qty > 0;
+                    const ventasAcum = Number(item.ventas_acumuladas || 0);
 
-                  return (
-                    <div key={item.id} className={`rounded-2xl border p-4 flex flex-col gap-2 ${cardBg}
-                      ${isInCart ? (theme === 'dark' ? 'border-yellow-500/60' : 'border-yellow-400') : ''}`}>
-                      <div className="flex items-start justify-between gap-1">
+                    return (
+                      <div
+                        key={item.id}
+                        className={`rounded-2xl border p-4 flex flex-col gap-2 transition-all ${cardBg}
+                          ${isInCart ? (theme === 'dark' ? 'border-yellow-500/60' : 'border-yellow-400') : ''}`}
+                      >
+                        {/* Subtle High-Rotation + Type/Unit Indicator */}
+                        <div className="flex items-center justify-between gap-1 flex-wrap">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-semibold text-amber-500 bg-amber-500/10 border border-amber-500/20 rounded-full px-2 py-0.5">
+                            <FaFire size={9} /> Alta rotación · {ventasAcum}
+                          </span>
+                          <div className="flex items-center gap-1">
+                            {isVarProduct && (
+                              <Badge color="indigo" size="sm">
+                                {item.variantes.length} var.
+                              </Badge>
+                            )}
+                            {item._type === 'Producto' && isDecItem && (
+                              <Badge color="blue" size="sm">
+                                ⚖️ {item.unidadMedida || unitLbl}
+                              </Badge>
+                            )}
+                          </div>
+                        </div>
+
                         <p className={`text-xs font-bold uppercase tracking-wide ${isInCart ? 'text-yellow-500' : (theme === 'dark' ? 'text-gray-100' : 'text-gray-800')}`}>
                           {item.nombre}
                         </p>
-                        {item._type === 'Producto' && isKgItem && (
-                          <span className="text-[9px] font-bold bg-blue-500/15 text-blue-400 border border-blue-400/30 rounded-full px-1.5 py-0.5 shrink-0">⚖️ kg</span>
-                        )}
-                      </div>
-                      {/* Image */}
-                      <div
-                        onClick={() => { if (!isKgItem) setQty(item, getQty(item.id) + 1); }}
-                        className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden ${
-                          !isKgItem ? 'cursor-pointer hover:opacity-80' : 'cursor-default'
-                        } transition-opacity ${theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'}`}
-                        title={!isKgItem ? 'Haz clic para agregar rápido 1 unidad' : 'Ingresa el peso a vender abajo'}
-                      >
-                        {item.imagen
-                          ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain pointer-events-none" />
-                          : <FaImage size={32} className={`pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-300'}`} />}
-                      </div>
-                      {/* Price */}
-                      <p className={`text-sm text-center ${theme === 'dark' ? 'text-gray-300' : 'text-gray-700'}`}>
-                        S/. {parseFloat(item.precio || 0).toFixed(2)}{isKgItem ? ' /kg' : ''}
-                      </p>
-                      {item._type === 'Producto' && (
-                        <p className={`text-xs text-center ${(item.stock ?? 0) <= 0 ? 'text-red-400' : (theme === 'dark' ? 'text-gray-500' : 'text-gray-400')}`}>
-                          {isKgItem
-                            ? `⚖️ ${parseFloat(item.stock ?? 0).toFixed(3)} kg disp.`
-                            : `Stock: ${item.stock ?? 0}`}
+
+                        {/* Image */}
+                        <div
+                          onClick={() => {
+                            if (isVarProduct) {
+                              setVariantModalProduct(item);
+                            } else if (isDecItem) {
+                              if (getQty(item.id) === 0 && maxQty > 0) {
+                                setQtyByKey(item, Math.min(1, maxQty));
+                                setShowCart(true);
+                              }
+                            } else {
+                              setQtyByKey(item, getQty(item.id) + 1);
+                            }
+                          }}
+                          className={`w-full aspect-square rounded-xl flex items-center justify-center overflow-hidden cursor-pointer hover:opacity-80 transition-opacity ${
+                            theme === 'dark' ? 'bg-gray-700' : 'bg-gray-100'
+                          }`}
+                          title={
+                            isVarProduct
+                              ? 'Haz clic para elegir Talla y Color'
+                              : isDecItem
+                                ? `Haz clic para agregar o ingresa cantidad en ${unitLbl}`
+                                : 'Haz clic para agregar rápido 1 unidad'
+                          }
+                        >
+                          {item.imagen
+                            ? <img src={item.imagen} alt={item.nombre} className="w-full h-full object-contain pointer-events-none" />
+                            : <FaImage size={32} className={`pointer-events-none ${theme === 'dark' ? 'text-gray-600' : 'text-gray-300'}`} />}
+                        </div>
+
+                        {/* Price */}
+                        <p className={`text-sm font-semibold text-center ${theme === 'dark' ? 'text-gray-200' : 'text-gray-800'}`}>
+                          S/. {parseFloat(item.precio || 0).toFixed(2)}{isDecItem ? ` / ${unitLbl}` : ''}
                         </p>
-                      )}
-                      {/* Qty / weight selector */}
-                      {isKgItem ? (
-                        <div className="flex flex-col gap-1 mt-1">
-                          <div className={`flex items-center gap-1 px-2 py-1.5 border rounded-full ${inputCls}`}>
-                            <span className="text-xs text-gray-400 shrink-0">⚖️</span>
+
+                        {/* Stock */}
+                        {item._type === 'Producto' && (
+                          <p className={`text-xs text-center ${(item.stock ?? 0) <= 0 ? 'text-red-400' : (theme === 'dark' ? 'text-gray-400' : 'text-gray-500')}`}>
+                            {isDecItem
+                              ? `Stock: ${parseFloat(item.stock ?? 0).toFixed(3)} ${unitLbl} disp.`
+                              : `Stock: ${item.stock ?? 0} ${unitLbl}`}
+                          </p>
+                        )}
+
+                        {/* Action / Qty selector by product type */}
+                        {isVarProduct ? (
+                          <div className="flex flex-col gap-1.5 mt-1">
+                            <Btn
+                              type="button"
+                              size="sm"
+                              variant={isInCart ? 'primary' : 'secondary'}
+                              fullWidth
+                              leftIcon={<FaLayerGroup size={11} />}
+                              onClick={() => setVariantModalProduct(item)}
+                            >
+                              {isInCart ? `Elegir Talla/Color (${qty} en carrito)` : 'Elegir Talla y Color'}
+                            </Btn>
+                          </div>
+                        ) : isDecItem ? (
+                          <div className="flex flex-col gap-1 mt-1">
+                            <div className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-full ${inputCls}`}>
+                              <span className="text-xs text-gray-400 shrink-0">⚖️</span>
+                              <input
+                                type="number"
+                                aria-label={`Cantidad decimal ${item.nombre}`}
+                                value={getDisplayQty(item.id) === '0' ? '' : getDisplayQty(item.id)}
+                                onChange={e => handleQtyInputChange(item, e.target.value)}
+                                onBlur={() => handleQtyInputBlur(item)}
+                                min={0}
+                                max={maxQty}
+                                step="0.001"
+                                placeholder="0.000"
+                                className="flex-1 bg-transparent outline-none text-sm text-center"
+                              />
+                              <span className="text-xs text-gray-400 shrink-0 font-semibold">{unitLbl}</span>
+                            </div>
+                            {isInCart && (
+                              <div className="flex items-center justify-between px-1">
+                                <span className="text-[10px] font-bold text-yellow-500">
+                                  Subtotal: S/. {calcExactSubtotal(qty, item.precio).toFixed(2)}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => removeFromCart(item.id)}
+                                  className="text-[10px] text-red-400 hover:text-red-300 transition-colors"
+                                >
+                                  Quitar
+                                </button>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center justify-center gap-2 mt-1">
+                            <button
+                              type="button"
+                              onClick={() => setQtyByKey(item, getQty(item.id) - 1)}
+                              disabled={getQty(item.id) === 0}
+                              className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
+                                disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}
+                            >
+                              <FaMinus size={10} />
+                            </button>
                             <input
                               type="number"
-                              value={getDisplayQty(item.id) === '0' ? '' : getDisplayQty(item.id)}
+                              aria-label={`Cantidad ${item.nombre}`}
+                              value={getDisplayQty(item.id)}
                               onChange={e => handleQtyInputChange(item, e.target.value)}
                               onBlur={() => handleQtyInputBlur(item)}
                               min={0}
                               max={maxQty}
-                              step="0.001"
-                              placeholder="0.000"
-                              className="flex-1 bg-transparent outline-none text-sm text-center"
+                              className={`w-16 text-center text-sm py-1 border rounded-full outline-none ${inputCls}`}
                             />
-                            <span className="text-xs text-gray-400 shrink-0">kg</span>
-                          </div>
-                          {isInCart && (
-                            <button onClick={() => removeFromCart(item.id)}
-                              className="text-[10px] text-red-400 hover:text-red-300 text-center transition-colors">
-                              Quitar
+                            <button
+                              type="button"
+                              onClick={() => setQtyByKey(item, getQty(item.id) + 1)}
+                              disabled={item._type === 'Producto' && getQty(item.id) >= maxQty}
+                              className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
+                                disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}
+                            >
+                              <FaPlus size={10} />
                             </button>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex items-center justify-center gap-2 mt-1">
-                          <button
-                            onClick={() => setQty(item, getQty(item.id) - 1)}
-                            disabled={getQty(item.id) === 0}
-                            className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
-                              disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
-                            <FaMinus size={10} />
-                          </button>
-                          <input
-                            type="number"
-                            value={getDisplayQty(item.id)}
-                            onChange={e => handleQtyInputChange(item, e.target.value)}
-                            onBlur={() => handleQtyInputBlur(item)}
-                            min={0}
-                            max={maxQty}
-                            className={`w-16 text-center text-sm py-1 border rounded-full outline-none ${inputCls}`}
-                          />
-                          <button
-                            onClick={() => setQty(item, getQty(item.id) + 1)}
-                            disabled={item._type === 'Producto' && getQty(item.id) >= maxQty}
-                            className={`w-7 h-7 rounded-full border flex items-center justify-center transition-colors
-                              disabled:opacity-30 ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-600 hover:bg-gray-100'}`}>
-                            <FaPlus size={10} />
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Pagination bar when searching/filtering > 25 items */}
+                {!isSearchAndFilterEmpty && totalPages > 1 && (
+                  <div className="flex items-center justify-between pt-6 pb-2">
+                    <Btn
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={safePage <= 1}
+                      onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                    >
+                      Anterior
+                    </Btn>
+                    <span className={`text-xs font-bold ${ds.text}`}>
+                      Página {safePage} de {totalPages}
+                    </span>
+                    <Btn
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      disabled={safePage >= totalPages}
+                      onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                    >
+                      Siguiente
+                    </Btn>
+                  </div>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -449,29 +979,110 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
             <>
               <div className={`flex items-center justify-between px-5 py-4 border-b ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
                 <h2 className={`font-bold italic text-base ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>Carrito de Ventas</h2>
-                <button onClick={() => setShowCart(false)} className="text-gray-400 hover:text-red-400"><FaTimes /></button>
+                <button type="button" onClick={() => setShowCart(false)} className="text-gray-400 hover:text-red-400"><FaTimes /></button>
               </div>
-              {/* Cart items */}
-              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
+              {/* Cart items with inline decimal/unit editing */}
+              <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2.5">
                 {cart.length === 0 ? (
                   <p className={`text-sm text-center py-8 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>El carrito está vacío</p>
                 ) : (
-                  cart.map(({ item, qty }) => (
-                    <div key={item.id}
-                      className={`flex items-center justify-between px-3 py-3 rounded-xl border ${theme === 'dark' ? 'border-gray-700 bg-gray-700/50' : 'border-gray-200 bg-gray-50'}`}>
-                      <div className="flex-1 min-w-0">
-                        <p className={`text-xs font-bold uppercase truncate ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>{item.nombre}</p>
-                        <p className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                          {item.unidadMedida === 'Kilogramo'
-                            ? `⚖️ ${parseFloat(qty).toFixed(3)} kg · Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`
-                            : `Cant. ${qty} · Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`}
-                        </p>
+                  cart.map((line) => {
+                    const { item, qty } = line;
+                    const key = getLineKey(line);
+                    const isDec = allowsDecimals(item);
+                    const unitLbl = getUnitLabel(item);
+                    const lineSubtotal = calcExactSubtotal(qty, item.precio);
+                    const maxQty = getMaxQty(item);
+
+                    return (
+                      <div
+                        key={key}
+                        className={`flex flex-col gap-2 px-3 py-3 rounded-xl border ${theme === 'dark' ? 'border-gray-700 bg-gray-700/50' : 'border-gray-200 bg-gray-50'}`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex-1 min-w-0">
+                            <p className={`text-xs font-bold uppercase leading-tight ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>
+                              {item.nombreBase || item.nombre}
+                            </p>
+                            {item.varianteId && (
+                              <div className="mt-1">
+                                <Badge color="indigo" size="sm">
+                                  Talla {item.varianteTalla} · {item.varianteColor}
+                                </Badge>
+                              </div>
+                            )}
+                            <p className={`text-[11px] mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                              S/. {parseFloat(item.precio || 0).toFixed(2)} / {unitLbl}
+                            </p>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeFromCart(key)}
+                            aria-label={`Quitar ${item.nombre}`}
+                            className="text-red-400 hover:text-red-500 transition-colors shrink-0 p-1"
+                          >
+                            <FaTrash size={12} />
+                          </button>
+                        </div>
+
+                        {/* Interactive quantity editor inside Cart (supports decimals e.g. 0.750 kg / 2.5 m) */}
+                        <div className="flex items-center justify-between gap-2 pt-1">
+                          {isDec ? (
+                            <div className={`flex items-center gap-1 px-2.5 py-1 border rounded-full w-36 ${inputCls}`}>
+                              <input
+                                type="number"
+                                aria-label={`Cantidad en carrito ${item.nombre}`}
+                                value={getDisplayQty(key)}
+                                onChange={e => handleQtyInputChange(item, e.target.value, key)}
+                                onBlur={() => handleQtyInputBlur(item, key)}
+                                min="0.001"
+                                max={maxQty}
+                                step="0.001"
+                                className="w-full bg-transparent outline-none text-xs text-center font-semibold"
+                              />
+                              <span className="text-[11px] text-gray-400 font-bold shrink-0">{unitLbl}</span>
+                            </div>
+                          ) : (
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => setQtyByKey(item, qty - 1, key)}
+                                className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs ${
+                                  theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                <FaMinus size={8} />
+                              </button>
+                              <input
+                                type="number"
+                                aria-label={`Cantidad en carrito ${item.nombre}`}
+                                value={getDisplayQty(key)}
+                                onChange={e => handleQtyInputChange(item, e.target.value, key)}
+                                onBlur={() => handleQtyInputBlur(item, key)}
+                                min={1}
+                                max={maxQty}
+                                step={1}
+                                className={`w-12 text-center text-xs py-0.5 border rounded-full outline-none font-semibold ${inputCls}`}
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setQtyByKey(item, qty + 1, key)}
+                                disabled={item._type === 'Producto' && qty >= maxQty}
+                                className={`w-6 h-6 rounded-full border flex items-center justify-center text-xs disabled:opacity-30 ${
+                                  theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-200'
+                                }`}
+                              >
+                                <FaPlus size={8} />
+                              </button>
+                            </div>
+                          )}
+                          <span className={`text-xs font-extrabold ${theme === 'dark' ? 'text-yellow-400' : 'text-gray-900'}`}>
+                            S/. {lineSubtotal.toFixed(2)}
+                          </span>
+                        </div>
                       </div>
-                      <button onClick={() => removeFromCart(item.id)} className="ml-3 text-red-400 hover:text-red-500 transition-colors shrink-0">
-                        <FaTrash size={13} />
-                      </button>
-                    </div>
-                  ))
+                    );
+                  })
                 )}
               </div>
               {/* Cart footer */}
@@ -481,15 +1092,20 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
                   <span className={`text-sm font-bold ${theme === 'dark' ? 'text-white' : 'text-gray-900'}`}>S/. {cartTotal.toFixed(2)}</span>
                 </div>
                 <div className="flex gap-2">
-                  <button onClick={clearCart}
+                  <button
+                    type="button"
+                    onClick={clearCart}
                     className={`flex-1 py-2.5 rounded-full border font-bold text-sm transition-colors
-                      ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-700 hover:bg-gray-100'}`}>
+                      ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-400 text-gray-700 hover:bg-gray-100'}`}
+                  >
                     VACIAR CARRITO
                   </button>
                   <button
+                    type="button"
                     onClick={() => { setShowCart(false); onNext(); }}
                     disabled={cart.length === 0}
-                    className="flex-1 py-2.5 rounded-full bg-gray-800 hover:bg-yellow-500 hover:text-black text-white font-bold text-sm disabled:opacity-40 transition-colors duration-300 cursor-pointer">
+                    className="flex-1 py-2.5 rounded-full bg-gray-800 hover:bg-yellow-500 hover:text-black text-white font-bold text-sm disabled:opacity-40 transition-colors duration-300 cursor-pointer"
+                  >
                     SIGUIENTE
                   </button>
                 </div>
@@ -502,12 +1118,23 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
       {/* SIGUIENTE button (floating, bottom right) */}
       {!showCart && (
         <button
+          type="button"
           onClick={onNext}
           disabled={cart.length === 0}
           className="fixed bottom-8 right-8 flex items-center gap-3 px-7 py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black disabled:opacity-40 text-white font-bold rounded-full shadow-2xl transition-all duration-300 cursor-pointer hover:scale-105 z-40"
         >
           SIGUIENTE <FaArrowLeft className="rotate-180" />
         </button>
+      )}
+
+      {/* Modal Selector Rápido de Variantes (Talla / Color) */}
+      {variantModalProduct && (
+        <VariantSelectorModal
+          product={variantModalProduct}
+          cart={cart}
+          onAddVariant={handleAddVariantToCart}
+          onClose={() => setVariantModalProduct(null)}
+        />
       )}
     </div>
   );
@@ -519,9 +1146,14 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSuc
 const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, sucursalId }) => {
   const ds = useDS();
   const { can } = usePermission();
+  const { addOportunidad, addSeguimiento } = useCRM();
   const [condicionPago, setCondicionPago] = useState('CONTADO');
   const [fechaVencimiento, setFechaVencimiento] = useState('');
+  const [usarAdelanto, setUsarAdelanto] = useState(false);
+  const [adelantoMonto, setAdelantoMonto] = useState('');
+  const [adelantoMetodo, setAdelantoMetodo] = useState('Efectivo');
   const [saleError, setSaleError] = useState('');
+  const [crmQuoteFeedback, setCrmQuoteFeedback] = useState(null);
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -538,7 +1170,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
 
   const { empresa } = useEmpresa();
 
-  // Pre-load client passed from Principal (Venta button)
+  // Pre-load client passed from Principal (Venta button) or CRM
   useEffect(() => {
     const preloaded = preloadedClient || location.state?.preloadedClient;
     if (preloaded) {
@@ -556,7 +1188,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const subtotal = cart.reduce((s, { item, qty }) => s + qty * parseFloat(item.precio || 0), 0);
+  const subtotal = cart.reduce((s, { item, qty }) => s + calcExactSubtotal(qty, item.precio), 0);
 
   const getActivePromotions = () => {
     try {
@@ -601,7 +1233,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
     // 1. Calculate item-level discounts
     let totalItemDiscounts = 0;
     cart.forEach(({ item, qty }) => {
-      const itemSubtotal = (parseFloat(item.precio) || 0) * qty;
+      const itemSubtotal = calcExactSubtotal(qty, item.precio);
 
       // Find all matching standard or qty promos for this item
       const matchingPromos = activePromos.filter(p => {
@@ -617,14 +1249,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
           return itemCats.includes(p.aplicaId);
         }
         if (p.aplicaA === 'producto') {
-          return String(item.id) === String(p.aplicaId);
+          return String(item.parentProductId ?? item.id) === String(p.aplicaId);
         }
         return false;
       });
 
-      // Prioritize manually entered coupons, otherwise take the first automatic promo in the list order
       const appliedCoupon = matchingPromos.find(p => p.tipo === 'coupon');
-      const promoToApply = appliedCoupon || matchingPromos[0]; // first automatic promotion in the list order!
+      const promoToApply = appliedCoupon || matchingPromos[0];
 
       let itemDiscount = 0;
       if (promoToApply) {
@@ -642,7 +1273,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
             }
           }
         } else {
-          // Standard product/coupon discount
           if (promoToApply.valorTipo === '%') {
             itemDiscount = (parseFloat(item.precio) || 0) * (parseFloat(promoToApply.valor) / 100) * qty;
           } else {
@@ -663,7 +1293,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
       return false;
     });
 
-    // Filter to find the first one that matches the minimum purchase criteria
     const orderPromoToApply = orderPromos.find(p => {
       const minC = parseFloat(p.minCompra) || 0;
       return subtotalAfterItems >= minC;
@@ -684,9 +1313,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
 
   const igvRate = 18;
   const { rate: discount, amt: discountAmt } = calcDiscount();
-  const total = Math.max(0, subtotal - discountAmt);
+  const total = Number(Math.max(0, subtotal - discountAmt).toFixed(2));
   const opGravada = total / (1 + (igvRate / 100));
   const igvMonto = total - opGravada;
+
+  // Real-time credit summary (Feature 4)
+  const effectiveAdelantoInput = condicionPago === 'CREDITO' && usarAdelanto ? Number(adelantoMonto || 0) : 0;
+  const creditSummary = calculateCreditSummary(total, effectiveAdelantoInput);
 
   const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
   const inputCls = theme === 'dark' ? 'bg-transparent border-gray-600 text-white placeholder-gray-500' : 'bg-transparent border-gray-300 text-gray-900 placeholder-gray-400';
@@ -694,6 +1327,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
 
   const handleSearch = () => {
     setSaleError('');
+    setCrmQuoteFeedback(null);
     const allClients = [
       ...simulatedClients,
       ...JSON.parse(localStorage.getItem('ersoft_clients') || '[]'),
@@ -718,6 +1352,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
 
   const handleAddClient = () => {
     setSaleError('');
+    setCrmQuoteFeedback(null);
     const effectiveDocNumber = docNumber.trim() || clientForm.documento.trim();
     const errs = {};
 
@@ -753,7 +1388,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
       correo: clientForm.correo.trim(),
     };
     const saved = JSON.parse(localStorage.getItem('ersoft_clients') || '[]');
-    // Avoid duplicate: only insert if no client with same docType+docNumber exists
     const isDuplicate = effectiveDocNumber && saved.some(
       c => c.docType === docType && c.docNumber === effectiveDocNumber
     );
@@ -769,50 +1403,47 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
   const handleApplyDiscount = () => {
     const code = discountCode.trim().toUpperCase();
     if (!code) {
-       setDiscountMsg('');
-       return;
+      setDiscountMsg('');
+      return;
     }
-    
     if (appliedCodes.includes(code)) {
-       setDiscountMsg('✗ Código ya aplicado');
-       return;
+      setDiscountMsg('✗ Código ya aplicado');
+      return;
     }
-
     const activePromos = getActivePromotions();
     const couponPromo = activePromos.find(p => p.tipo === 'coupon' && p.codigo.trim().toUpperCase() === code);
 
     if (couponPromo) {
-       let appliesToCart = false;
-       if (couponPromo.aplicaA === 'catalogo' || couponPromo.aplicaA === 'pedido') {
-         appliesToCart = true;
-       } else if (couponPromo.aplicaA === 'categoria') {
-         appliesToCart = cart.some(({ item }) => {
-           const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
-           return itemCats.includes(couponPromo.aplicaId);
-         });
-       } else if (couponPromo.aplicaA === 'producto') {
-         appliesToCart = cart.some(({ item }) => String(item.id) === String(couponPromo.aplicaId));
-       }
+      let appliesToCart = false;
+      if (couponPromo.aplicaA === 'catalogo' || couponPromo.aplicaA === 'pedido') {
+        appliesToCart = true;
+      } else if (couponPromo.aplicaA === 'categoria') {
+        appliesToCart = cart.some(({ item }) => {
+          const itemCats = Array.isArray(item.categorias) ? item.categorias : (item.categoria ? [item.categoria] : []);
+          return itemCats.includes(couponPromo.aplicaId);
+        });
+      } else if (couponPromo.aplicaA === 'producto') {
+        appliesToCart = cart.some(({ item }) => String(item.parentProductId ?? item.id) === String(couponPromo.aplicaId));
+      }
 
-       if (appliesToCart) {
-         setAppliedCodes([...appliedCodes, code]);
-         setDiscountMsg('✓ Cupón aplicado');
-         setDiscountCode('');
-       } else {
-         setDiscountMsg('✗ El cupón no aplica a los productos del carrito');
-       }
+      if (appliesToCart) {
+        setAppliedCodes([...appliedCodes, code]);
+        setDiscountMsg('✓ Cupón aplicado');
+        setDiscountCode('');
+      } else {
+        setDiscountMsg('✗ El cupón no aplica a los productos del carrito');
+      }
     } else {
-       setDiscountMsg('✗ Código de cupón inválido o expirado');
+      setDiscountMsg('✗ Código de cupón inválido o expirado');
     }
   };
 
   const handleRemoveDiscount = (codeToRemove) => {
-     setAppliedCodes(appliedCodes.filter(c => c !== codeToRemove));
+    setAppliedCodes(appliedCodes.filter(c => c !== codeToRemove));
   };
 
   const docPlaceholder = { DNI: '8 dígitos', CE: '9 dígitos', RUC: '11 dígitos' };
 
-  // Lógica de visibilidad condicional de documentos
   const billingMode = empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION';
   const isRusRucEmpresa = empresa?.tipoDocumento === 'RUS' || empresa?.tipoDocumento === 'RUC';
   const isRucEmpresa = empresa?.tipoDocumento === 'RUC';
@@ -826,7 +1457,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
     return true;
   });
 
-  // Si el tipo de venta actual ya no está disponible tras cambiar de cliente o de documento, volver a Ticket o Cotizar
   useEffect(() => {
     if (!availableSaleTypes.includes(saleType)) {
       setSaleType(availableSaleTypes[0] || 'Ticket');
@@ -843,13 +1473,123 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
     if (w) { w.document.write(html); w.document.close(); }
   };
 
+  // Feature 5: Guardar como Cotización en CRM (Etapa COTIZADO + alerta en Calendario)
+  const handleSaveAsQuoteToCRM = () => {
+    setSaleError('');
+    setCrmQuoteFeedback(null);
+    const effectiveDoc = clientForm.documento?.trim() || docNumber?.trim() || client?.docNumber || client?.documento || '';
+    const effectiveNombre = (clientForm.nombre || client?.nombre || client?.name || '').trim();
+    const effectiveApellidos = (clientForm.apellidos || client?.apellidos || client?.surname || '').trim();
+    const candidateClient = {
+      ...client,
+      ...clientForm,
+      nombre: effectiveNombre,
+      apellidos: effectiveApellidos,
+      documento: effectiveDoc,
+      docType: docType || client?.docType || 'DNI',
+    };
+    const validationErr = validateQuoteForCRM({ client: candidateClient, cart });
+    if (validationErr) {
+      setSaleError(validationErr);
+      return;
+    }
+
+    const clienteNombreCompleto = `${effectiveNombre} ${effectiveApellidos}`.trim();
+    const followUpDate = todayLima();
+    const itemsCotizados = cart.map(({ item, qty }) => ({
+      id: item.parentProductId ?? item.id,
+      varianteId: item.varianteId || null,
+      varianteTalla: item.varianteTalla || null,
+      varianteColor: item.varianteColor || null,
+      nombre: item.nombre,
+      precio: Number(item.precio || 0),
+      qty: Number(qty || 1),
+      cantidad: Number(qty || 1),
+      unidad_medida: getUnitLabel(item),
+      permite_decimales: allowsDecimals(item),
+      subtotal: calcExactSubtotal(qty, item.precio),
+      tipo: item._type === 'Servicio' ? 'SERVICIO' : 'PRODUCTO',
+      _type: item._type || 'Producto',
+    }));
+
+    const resumenItems = itemsCotizados
+      .map(it => `${it.nombre} x${it.qty} ${it.unidad_medida} (S/ ${it.subtotal.toFixed(2)})`)
+      .join(', ');
+
+    const nuevaOp = addOportunidad({
+      sucursal_id: String(sucursalId || '1'),
+      sucursalId: String(sucursalId || '1'),
+      titulo_pedido: `Cotización POS (${saleType}) - ${clienteNombreCompleto}`,
+      cliente_nombre: clienteNombreCompleto,
+      tipo_documento: candidateClient.docType,
+      documento: effectiveDoc,
+      cliente_documento: effectiveDoc,
+      telefono: (clientForm.telefono || client?.telefono || '').trim(),
+      cliente_telefono: (clientForm.telefono || client?.telefono || '').trim(),
+      correo: (clientForm.correo || client?.correo || '').trim(),
+      cliente_correo: (clientForm.correo || client?.correo || '').trim(),
+      etapa: 'COTIZADO',
+      monto_estimado: Number(total.toFixed(2)),
+      items_cotizados: itemsCotizados,
+      fecha_proximo_contacto: followUpDate,
+      origen: 'POS_COTIZACION',
+    });
+
+    if (nuevaOp?.oportunidad_id) {
+      addSeguimiento({
+        oportunidad_id: nuevaOp.oportunidad_id,
+        fecha_proximo_contacto: followUpDate,
+        realizado: false,
+        detalle_conversacion: `Cotización enviada desde POS (${saleType}) por S/ ${total.toFixed(2)}. Detalle: ${resumenItems}`,
+      });
+    }
+
+    setCrmQuoteFeedback({
+      oportunidadId: nuevaOp?.oportunidad_id,
+      cliente: clienteNombreCompleto,
+      total: total.toFixed(2),
+      fechaAlerta: followUpDate,
+    });
+  };
+
   const proceed = () => {
     if (!can('ventas_caja', 'CREAR')) return;
     const effectiveDoc = clientForm.documento?.trim() || docNumber?.trim() || '';
+    const rawAdelanto = condicionPago === 'CREDITO' && usarAdelanto ? Number(adelantoMonto || 0) : 0;
+
+    if (condicionPago === 'CREDITO' && usarAdelanto) {
+      if (!Number.isFinite(rawAdelanto) || rawAdelanto < 0) {
+        return setSaleError('El monto de adelanto debe ser un número válido mayor o igual a 0.');
+      }
+      if (rawAdelanto >= total && total > 0) {
+        return setSaleError('El monto de adelanto debe ser menor al total de la venta (para pago total use CONTADO).');
+      }
+    }
+
     const data = {
-      client: { ...clientForm, documento: effectiveDoc, docType },
-      saleType, discount, discountAmt, total, subtotal, opGravada, igvMonto, igvRate,
-      condicion_pago: condicionPago, fecha_vencimiento: condicionPago === 'CREDITO' ? fechaVencimiento : null, sucursalId,
+      client: {
+        ...clientForm,
+        nombre: clientForm.nombre || client?.name || client?.nombre || '',
+        apellidos: clientForm.apellidos || client?.surname || client?.apellidos || '',
+        documento: effectiveDoc,
+        docType,
+      },
+      saleType,
+      discount,
+      discountAmt,
+      total,
+      subtotal,
+      opGravada,
+      igvMonto,
+      igvRate,
+      condicion_pago: condicionPago,
+      fecha_vencimiento: condicionPago === 'CREDITO' ? fechaVencimiento : null,
+      adelanto_monto: condicionPago === 'CREDITO' && usarAdelanto ? Number(rawAdelanto.toFixed(2)) : 0,
+      adelanto_metodo: condicionPago === 'CREDITO' && usarAdelanto && rawAdelanto > 0 ? adelantoMetodo : null,
+      monto_adelanto: condicionPago === 'CREDITO' && usarAdelanto ? Number(rawAdelanto.toFixed(2)) : 0,
+      metodo_pago_adelanto: condicionPago === 'CREDITO' && usarAdelanto && rawAdelanto > 0 ? adelantoMetodo : null,
+      saldo_pendiente: condicionPago === 'CREDITO' ? creditSummary.saldoPendienteCredito : 0,
+      sucursalId,
     };
     const error = validateSale(data, billingMode);
     if (error) return setSaleError(error);
@@ -878,7 +1618,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
               placeholder={`Digite aquí la documentación del cliente (${docPlaceholder[docType]})`}
               className={`flex-1 px-4 py-2 border rounded-full text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${theme === 'dark' ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`}
             />
-            <button onClick={handleSearch}
+            <button type="button" onClick={handleSearch}
               className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-white rounded-full text-sm font-semibold">
               <FaSearch size={13} />
             </button>
@@ -894,7 +1634,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
             </div>
             <div className={`flex rounded-none overflow-hidden border-b-0 ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-[#1a1a1a]'}`}>
               {availableSaleTypes.map(t => (
-                <button key={t} onClick={() => { setSaleType(t); setSaleError(''); }}
+                <button type="button" key={t} onClick={() => { setSaleType(t); setSaleError(''); }}
                   className={`flex-1 py-2.5 text-sm font-semibold transition-colors
                     ${saleType === t ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
                   {t === 'Ticket' ? 'Nota de Venta NV01' : t === 'Boleta' ? 'Boleta (B001)' : t === 'Factura' ? 'Factura (F001)' : t}
@@ -992,6 +1732,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
           {/* AGREGAR CLIENTE — always visible; disabled when client is already selected */}
           <div className="space-y-2">
             <button
+              type="button"
               onClick={handleAddClient}
               disabled={!!client}
               className={`w-full py-3 font-bold text-sm tracking-wider rounded-full transition-all
@@ -1010,6 +1751,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
               <div className="flex items-center justify-between px-1">
                 <span className="text-green-400 text-sm font-semibold">✓ Cliente seleccionado</span>
                 <button
+                  type="button"
                   onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setClientErrors({}); setAddClientMsg(''); setSaleError(''); }}
                   className="text-xs text-red-400 hover:text-red-300 underline"
                 >
@@ -1019,15 +1761,126 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
             )}
           </div>
 
+          {/* Condición de Pago + Fecha de Vencimiento + Adelanto / Inicial (Feature 4) */}
           <Card className={`space-y-3 ${ds.text}`}>
-            <Input label="Condición de pago" aria-label="Condición de pago" as="select" value={condicionPago} onChange={e => { setCondicionPago(e.target.value); setSaleError(''); }}>
-              <option value="CONTADO">CONTADO</option><option value="CREDITO">CREDITO</option>
+            <Input
+              label="Condición de pago"
+              aria-label="Condición de pago"
+              as="select"
+              value={condicionPago}
+              onChange={e => {
+                setCondicionPago(e.target.value);
+                setSaleError('');
+                if (e.target.value !== 'CREDITO') {
+                  setUsarAdelanto(false);
+                  setAdelantoMonto('');
+                }
+              }}
+            >
+              <option value="CONTADO">CONTADO</option>
+              <option value="CREDITO">CREDITO</option>
             </Input>
-            {condicionPago === 'CREDITO' && <Input label="Fecha de vencimiento" aria-label="Fecha de vencimiento" type="date" min={todayLima()} value={fechaVencimiento} onChange={e => { setFechaVencimiento(e.target.value); setSaleError(''); }} required />}
+
+            {condicionPago === 'CREDITO' && (
+              <>
+                <Input
+                  label="Fecha de vencimiento"
+                  aria-label="Fecha de vencimiento"
+                  type="date"
+                  min={todayLima()}
+                  value={fechaVencimiento}
+                  onChange={e => { setFechaVencimiento(e.target.value); setSaleError(''); }}
+                  required
+                />
+
+                {/* Sección opcional: Registrar Adelanto / Inicial */}
+                <div className={`pt-2 border-t ${theme === 'dark' ? 'border-slate-700' : 'border-slate-200'} space-y-3`}>
+                  <div className="flex items-center justify-between gap-2">
+                    <label className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={usarAdelanto}
+                        onChange={e => {
+                          setUsarAdelanto(e.target.checked);
+                          if (!e.target.checked) setAdelantoMonto('');
+                          setSaleError('');
+                        }}
+                        className="rounded border-gray-400 text-yellow-500 focus:ring-yellow-500"
+                      />
+                      <span>Registrar Adelanto / Inicial (Opcional)</span>
+                    </label>
+                    <Badge color={creditSummary.adelantoPagadoHoy > 0 ? 'amber' : 'gray'} size="sm">
+                      {creditSummary.adelantoPagadoHoy > 0 ? 'Amortización parcial (PARCIAL)' : 'Sin inicial (PENDIENTE)'}
+                    </Badge>
+                  </div>
+
+                  {usarAdelanto && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+                      <Input
+                        label="Monto de Adelanto (S/)"
+                        aria-label="Monto de Adelanto (S/)"
+                        type="number"
+                        min="0"
+                        max={Math.max(0, total - 0.01).toFixed(2)}
+                        step="0.01"
+                        placeholder={`Máx. S/ ${Math.max(0, total - 0.01).toFixed(2)}`}
+                        value={adelantoMonto}
+                        onChange={e => {
+                          setAdelantoMonto(e.target.value);
+                          setSaleError('');
+                        }}
+                      />
+                      <Input
+                        label="Método de Pago del Adelanto"
+                        aria-label="Método de Pago del Adelanto"
+                        as="select"
+                        value={adelantoMetodo}
+                        onChange={e => {
+                          setAdelantoMetodo(e.target.value);
+                          setSaleError('');
+                        }}
+                      >
+                        {ADELANTO_PAYMENT_METHODS.map((m) => {
+                          const val = typeof m === 'string' ? m : m.value;
+                          const label = typeof m === 'string' ? m : m.label;
+                          return <option key={val} value={val}>{label}</option>;
+                        })}
+                      </Input>
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+
             {saleError && <p role="alert" className="text-sm text-red-400">{saleError}</p>}
           </Card>
+
+          {/* Confirmación de Cotización enviada al CRM */}
+          {crmQuoteFeedback && (
+            <Card className="border-emerald-500/40 bg-emerald-500/10 space-y-2">
+              <div className="flex items-center justify-between gap-2 flex-wrap">
+                <div className="flex items-center gap-2 text-emerald-500 font-bold text-sm">
+                  <FaCheckCircle />
+                  <span>Cotización guardada en CRM (Etapa: COTIZADO)</span>
+                </div>
+                <Badge color="green" size="sm">Seguimiento: {crmQuoteFeedback.fechaAlerta}</Badge>
+              </div>
+              <p className={`text-xs ${ds.text}`}>
+                Cliente: <strong>{crmQuoteFeedback.cliente}</strong> · Monto estimado: <strong>S/ {crmQuoteFeedback.total}</strong> · Alerta programada en el Calendario Operativo.
+              </p>
+              <div className="flex gap-2 pt-1">
+                <Btn type="button" size="sm" variant="secondary" onClick={() => navigate('/crm')}>
+                  Ver en CRM
+                </Btn>
+                <Btn type="button" size="sm" variant="ghost" onClick={() => navigate('/calendario')}>
+                  Ver en Calendario
+                </Btn>
+              </div>
+            </Card>
+          )}
+
           {/* Back */}
-          <button onClick={onBack} className={`text-sm ${theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'} underline`}>
+          <button type="button" onClick={onBack} className={`text-sm ${theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'} underline`}>
             ← Volver a productos
           </button>
 
@@ -1039,7 +1892,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
                 <span className={`text-xs ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>Ingrese el COD aquí</span>
                 <input value={discountCode} onChange={e => setDiscountCode(e.target.value)}
                   className={`flex-1 text-sm border-b bg-transparent outline-none py-1 ${inputCls}`} />
-                <button onClick={handleApplyDiscount}
+                <button type="button" onClick={handleApplyDiscount}
                   className="px-4 py-1.5 bg-gray-800 hover:bg-gray-700 text-white text-xs font-bold rounded-full">
                   APLICAR
                 </button>
@@ -1052,7 +1905,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
                   {appliedCodes.map(code => (
                     <div key={code} className={`flex items-center gap-1 px-3 py-1 rounded-full text-xs font-bold ${theme === 'dark' ? 'bg-green-900/30 text-green-400 border border-green-700' : 'bg-green-50 text-green-700 border border-green-200'}`}>
                       {code}
-                      <button onClick={() => handleRemoveDiscount(code)} className="ml-1 hover:text-red-500"><FaTimes size={10} /></button>
+                      <button type="button" onClick={() => handleRemoveDiscount(code)} className="ml-1 hover:text-red-500"><FaTimes size={10} /></button>
                     </div>
                   ))}
                 </div>
@@ -1061,20 +1914,29 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
           </div>
         </div>
 
-        {/* Right: Order summary */}
-        <div className={`w-72 flex flex-col border-l ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
+        {/* Right: Order summary + Real-time Credit Breakdown + CRM Quote Button */}
+        <div className={`w-80 flex flex-col border-l ${theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200'}`}>
           <div className={`px-5 py-4 border-b ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
             <h2 className={`font-bold italic text-base ${text}`}>Descripción</h2>
           </div>
           <div className="flex-1 overflow-y-auto px-4 py-3 space-y-2">
-            {cart.map(({ item, qty }) => (
-              <div key={item.id} className={`px-3 py-2 rounded-xl border ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
-                <p className={`text-xs font-bold uppercase truncate ${text}`}>{item.nombre}</p>
-                <p className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                  Cant. {qty} &nbsp; Total. S/. {(qty * parseFloat(item.precio || 0)).toFixed(2)}
-                </p>
-              </div>
-            ))}
+            {cart.map(({ item, qty }) => {
+              const unitLbl = getUnitLabel(item);
+              const sub = calcExactSubtotal(qty, item.precio);
+              return (
+                <div key={item.id} className={`px-3 py-2 rounded-xl border ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
+                  <p className={`text-xs font-bold uppercase truncate ${text}`}>{item.nombre}</p>
+                  {item.varianteId && (
+                    <p className="text-[10px] text-indigo-400 font-semibold">
+                      Talla {item.varianteTalla} · {item.varianteColor}
+                    </p>
+                  )}
+                  <p className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
+                    Cant. {qty} {unitLbl} &nbsp; Total. S/. {sub.toFixed(2)}
+                  </p>
+                </div>
+              );
+            })}
           </div>
           <div className={`border-t px-5 py-4 space-y-2 ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
             <div className="flex justify-between text-sm">
@@ -1099,17 +1961,52 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, suc
               <span className={text}>IMPORTE TOTAL</span>
               <span className={text}>S/. {total.toFixed(2)}</span>
             </div>
-            {saleType === 'Cotizar' ? (
-              <button onClick={handleCotizar}
-                className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
-                COTIZAR
-              </button>
-            ) : (
-              <button onClick={proceed}
-                className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
-                IR A PAGAR <FaArrowLeft className="rotate-180" />
-              </button>
+
+            {/* Real-time Credit Summary (Feature 4) */}
+            {condicionPago === 'CREDITO' && (
+              <div className={`mt-2 p-3 rounded-xl border text-xs space-y-1.5 ${
+                theme === 'dark' ? 'bg-slate-900/70 border-slate-700' : 'bg-amber-50/70 border-amber-200'
+              }`}>
+                <div className="flex justify-between">
+                  <span className={ds.muted}>Total Comprobante:</span>
+                  <span className={`font-bold ${text}`}>S/. {creditSummary.totalComprobante.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-emerald-500 font-semibold">
+                    Adelanto Pagado Hoy (entra a Caja{usarAdelanto && creditSummary.adelantoPagadoHoy > 0 ? ` · ${adelantoMetodo}` : ''}):
+                  </span>
+                  <span className="font-bold text-emerald-500">S/. {creditSummary.adelantoPagadoHoy.toFixed(2)}</span>
+                </div>
+                <div className="flex justify-between border-t pt-1.5 border-dashed border-slate-600/40">
+                  <span className="text-amber-500 font-bold">Saldo Pendiente a Crédito (va a CxC):</span>
+                  <span className="font-extrabold text-amber-500">S/. {creditSummary.saldoPendienteCredito.toFixed(2)}</span>
+                </div>
+              </div>
             )}
+
+            <div className="space-y-2 pt-2">
+              {saleType === 'Cotizar' ? (
+                <button type="button" onClick={handleCotizar}
+                  className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 transition-colors duration-300 cursor-pointer">
+                  COTIZAR
+                </button>
+              ) : (
+                <button type="button" onClick={proceed}
+                  className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 transition-colors duration-300 cursor-pointer">
+                  IR A PAGAR <FaArrowLeft className="rotate-180" />
+                </button>
+              )}
+
+              {/* Feature 5: Botón secundario "Guardar como Cotización en CRM" */}
+              <Btn
+                type="button"
+                variant="secondary"
+                className="w-full rounded-full"
+                onClick={handleSaveAsQuoteToCRM}
+              >
+                <FaPaperPlane className="text-xs" /> Guardar como Cotización en CRM
+              </Btn>
+            </div>
           </div>
         </div>
       </div>
@@ -1130,16 +2027,18 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
   const rows = cart.map(({ item, qty }) => `
     <tr>
       <td>${item.nombre}</td>
-      <td style="text-align:center">${qty}</td>
+      <td style="text-align:center">${qty} ${getUnitLabel(item)}</td>
       <td style="text-align:right">S/. ${parseFloat(item.precio || 0).toFixed(2)}</td>
-      <td style="text-align:right">S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}</td>
+      <td style="text-align:right">S/. ${calcExactSubtotal(qty, item.precio).toFixed(2)}</td>
     </tr>`).join('');
+  const adelantoAmt = Number(saleData?.adelanto_monto || 0);
+  const saldoPend = Number(saleData?.saldo_pendiente ?? Math.max(0, (saleData?.total || 0) - adelantoAmt));
   const payLabel = {
     digital: 'Billetera electrónica',
     bank: 'Transferencia / CCI',
     cash: 'Efectivo',
     pos: 'POS',
-    credit: `Crédito (Vence: ${saleData?.fecha_vencimiento || '—'})`,
+    credit: `Crédito (Vence: ${saleData?.fecha_vencimiento || '—'}${adelantoAmt > 0 ? ` · Adelanto S/ ${adelantoAmt.toFixed(2)} (${saleData?.adelanto_metodo || 'Efectivo'})` : ''})`,
   }[payMethod] || payMethod || '—';
   const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'Consumidor final';
   
@@ -1154,6 +2053,14 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
   if (dscAmt > 0) {
     const pctLabel = (saleData?.discount > 0 && saleData?.discount < 1) ? ` (${(saleData.discount * 100).toFixed(0)}%)` : '';
     discountHtml = `<tr><td colspan="3" style="text-align:right">Descuento${pctLabel}</td><td style="text-align:right;color:green">-S/. ${dscAmt.toFixed(2)}</td></tr>`;
+  }
+
+  let creditExtraHtml = '';
+  if (saleData?.condicion_pago === 'CREDITO') {
+    creditExtraHtml = `
+      <tr><td colspan="3" style="text-align:right">Adelanto Pagado Hoy (${saleData?.adelanto_metodo || 'Efectivo'})</td><td style="text-align:right">S/. ${adelantoAmt.toFixed(2)}</td></tr>
+      <tr><td colspan="3" style="text-align:right;font-weight:bold">Saldo Pendiente a Crédito</td><td style="text-align:right;font-weight:bold">S/. ${saldoPend.toFixed(2)}</td></tr>
+    `;
   }
 
   const logoTag = empresa?.logoPath
@@ -1199,6 +2106,7 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
         <tr><td colspan="3" style="text-align:right">Op. Gravada</td><td style="text-align:right">S/. ${opGravada.toFixed(2)}</td></tr>
         <tr><td colspan="3" style="text-align:right">IGV (${igvPct}%)</td><td style="text-align:right">S/. ${igvMonto.toFixed(2)}</td></tr>
         <tr class="total-row"><td colspan="3" style="text-align:right">IMPORTE TOTAL</td><td style="text-align:right">S/. ${total.toFixed(2)}</td></tr>
+        ${creditExtraHtml}
       </tfoot>
     </table>
     <div class="footer">
@@ -1369,9 +2277,9 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
             <tr class="border-b border-gray-200">
               <td class="py-1.5 px-2 text-center text-gray-600">(${idx + 1})</td>
               <td class="py-1.5 px-2 text-gray-900 font-medium break-all pr-2">${item.nombre}</td>
-              <td class="py-1.5 px-2 text-center text-gray-900">${qty}</td>
+              <td class="py-1.5 px-2 text-center text-gray-900">${qty} ${getUnitLabel(item)}</td>
               <td class="py-1.5 px-2 text-right text-gray-900 whitespace-nowrap">S/. ${parseFloat(item.precio || 0).toFixed(2)}</td>
-              <td class="py-1.5 px-2 text-right text-gray-900 whitespace-nowrap font-medium">S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}</td>
+              <td class="py-1.5 px-2 text-right text-gray-900 whitespace-nowrap font-medium">S/. ${calcExactSubtotal(qty, item.precio).toFixed(2)}</td>
             </tr>`).join('')}
         </tbody>
       </table>
@@ -1438,11 +2346,13 @@ const PAYMENT_METHODS = [
 const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
   const ds = useDS();
   const { can } = usePermission();
-  const { registrarVenta } = useFinanzas();
+  const { registrarVenta, refreshFinanzas, assertCanOperatePOS } = useFinanzas();
+  const { addOportunidad, addSeguimiento } = useCRM();
   const [saleError, setSaleError] = useState('');
+  const [crmQuoteFeedback, setCrmQuoteFeedback] = useState(null);
   const savedRef = useRef(false);
   const navigate = useNavigate();
-  const { productos, servicios, lotes, almacenes, bulkUpdateStock } = useInventario();
+  const { productos, servicios, lotes, almacenes, bulkUpdateStock, addKardexMovimiento, refreshData } = useInventario();
   const { empresa } = useEmpresa();
   const { user } = useAuth();
 
@@ -1467,6 +2377,81 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
   const getSaleId = () => {
     if (!saleIdRef.current) saleIdRef.current = genSaleId(saleData?.saleType || 'Ticket');
     return saleIdRef.current;
+  };
+
+  const creditSummary = calculateCreditSummary(
+    saleData?.total || 0,
+    saleData?.condicion_pago === 'CREDITO' ? Number(saleData?.adelanto_monto || 0) : 0
+  );
+
+  // Feature 5: Guardar como Cotización en CRM (Etapa COTIZADO + alerta en Calendario)
+  const handleSaveAsQuoteToCRM = () => {
+    setSaleError('');
+    setCrmQuoteFeedback(null);
+    const candidateClient = saleData?.client || null;
+    const validationErr = validateQuoteForCRM({ client: candidateClient, cart });
+    if (validationErr) {
+      setSaleError(validationErr);
+      return;
+    }
+
+    const clienteNombreCompleto = `${candidateClient.nombre || candidateClient.name || ''} ${candidateClient.apellidos || candidateClient.surname || ''}`.trim();
+    const followUpDate = todayLima();
+    const itemsCotizados = cart.map(({ item, qty }) => ({
+      id: item.parentProductId ?? item.id,
+      varianteId: item.varianteId || null,
+      varianteTalla: item.varianteTalla || null,
+      varianteColor: item.varianteColor || null,
+      nombre: item.nombre,
+      precio: Number(item.precio || 0),
+      qty: Number(qty || 1),
+      cantidad: Number(qty || 1),
+      unidad_medida: getUnitLabel(item),
+      permite_decimales: allowsDecimals(item),
+      subtotal: calcExactSubtotal(qty, item.precio),
+      tipo: item._type === 'Servicio' ? 'SERVICIO' : 'PRODUCTO',
+      _type: item._type || 'Producto',
+    }));
+
+    const resumenItems = itemsCotizados
+      .map(it => `${it.nombre} x${it.qty} ${it.unidad_medida} (S/ ${it.subtotal.toFixed(2)})`)
+      .join(', ');
+
+    const effectiveDoc = (candidateClient.documento || candidateClient.docNumber || '').trim();
+    const nuevaOp = addOportunidad({
+      sucursal_id: String(saleData?.sucursalId || '1'),
+      sucursalId: String(saleData?.sucursalId || '1'),
+      titulo_pedido: `Cotización POS (${saleData?.saleType || 'Ticket'}) - ${clienteNombreCompleto}`,
+      cliente_nombre: clienteNombreCompleto,
+      tipo_documento: candidateClient.docType || 'DNI',
+      documento: effectiveDoc,
+      cliente_documento: effectiveDoc,
+      telefono: (candidateClient.telefono || '').trim(),
+      cliente_telefono: (candidateClient.telefono || '').trim(),
+      correo: (candidateClient.correo || '').trim(),
+      cliente_correo: (candidateClient.correo || '').trim(),
+      etapa: 'COTIZADO',
+      monto_estimado: Number((saleData?.total || 0).toFixed(2)),
+      items_cotizados: itemsCotizados,
+      fecha_proximo_contacto: followUpDate,
+      origen: 'POS_COTIZACION',
+    });
+
+    if (nuevaOp?.oportunidad_id) {
+      addSeguimiento({
+        oportunidad_id: nuevaOp.oportunidad_id,
+        fecha_proximo_contacto: followUpDate,
+        realizado: false,
+        detalle_conversacion: `Cotización enviada desde POS (${saleData?.saleType || 'Ticket'}) por S/ ${(saleData?.total || 0).toFixed(2)}. Detalle: ${resumenItems}`,
+      });
+    }
+
+    setCrmQuoteFeedback({
+      oportunidadId: nuevaOp?.oportunidad_id,
+      cliente: clienteNombreCompleto,
+      total: (saleData?.total || 0).toFixed(2),
+      fechaAlerta: followUpDate,
+    });
   };
 
   const handleDupPantalla = () => {
@@ -1597,24 +2582,118 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
       popup.document.close();
     }
   };
+
+  // Supports both direct products/services and variant child items (via parentProductId)
   const findCatalogItem = (item) => {
     const isService = item._type === 'Servicio';
     const list = isService ? servicios : productos;
-    const byId = list.find(p => String(p.id) === String(item.id) && p.nombre === item.nombre);
+    const lookupId = item.parentProductId ?? item.id;
+    const byId = list.find(p => String(p.id) === String(lookupId));
     if (byId) return byId;
-    return list.find(p => p.nombre?.trim().toLowerCase() === item.nombre?.trim().toLowerCase() && (
+    const targetName = (item.nombreBase || item.nombre || '').trim().toLowerCase();
+    return list.find(p => p.nombre?.trim().toLowerCase() === targetName && (
       isService
         ? String(p.sucursalId || '1') === String(saleData.sucursalId)
         : String(almacenes.find(a => String(a.id) === String(lotes.find(l => String(l.id) === String(p.loteId))?.almacenId))?.sucursalId) === String(saleData.sucursalId)
     ));
   };
 
+  // Feature 4 helper: Persist credit advance (adelanto) into active Caja session and update CxC balance/status
+  const applyCreditAdvanceAndCxC = (saleId, totalVal) => {
+    if (saleData?.condicion_pago !== 'CREDITO') return;
+    const { adelantoPagadoHoy, saldoPendienteCredito, estadoCuenta } = calculateCreditSummary(
+      totalVal,
+      Number(saleData?.adelanto_monto || 0)
+    );
+    const metodoAdelanto = saleData?.adelanto_metodo || 'Efectivo';
+
+    // 1. Update Cuenta por Cobrar in ersoft_cuentas_cobrar_pagar so it reflects ONLY the pending balance
+    //    and state PARCIAL (if adelanto > 0) or PENDIENTE (if adelanto === 0)
+    try {
+      const rawCuentas = JSON.parse(localStorage.getItem('ersoft_cuentas_cobrar_pagar') || '[]');
+      const nowIso = new Date().toISOString();
+      const updatedCuentas = rawCuentas.map(c => {
+        if (String(c.comprobante_referencia) !== String(saleId)) return c;
+        const abonoInicial = adelantoPagadoHoy > 0
+          ? [{
+              abono_id: `abn-init-${Date.now()}`,
+              fecha: nowIso,
+              monto: adelantoPagadoHoy,
+              metodo_pago: metodoAdelanto,
+              tipo: 'ADELANTO_INICIAL',
+              registrado_por: user?.name || user?.username || 'Cajero POS',
+            }]
+          : [];
+        return {
+          ...c,
+          monto_total: Number(totalVal.toFixed(2)),
+          monto_pagado: adelantoPagadoHoy,
+          saldo_pendiente: saldoPendienteCredito,
+          estado: estadoCuenta,
+          abonos: abonoInicial,
+        };
+      });
+      localStorage.setItem('ersoft_cuentas_cobrar_pagar', JSON.stringify(updatedCuentas));
+    } catch (e) {
+      console.error('Error actualizando Cuenta por Cobrar con adelanto:', e);
+    }
+
+    // 2. If adelantoPagadoHoy > 0, add it to the active Caja session according to payment method
+    if (adelantoPagadoHoy > 0) {
+      try {
+        const rawSesiones = JSON.parse(localStorage.getItem('ersoft_caja_sesiones') || '[]');
+        const updatedSesiones = rawSesiones.map(s => {
+          const isOpen = ['ABIERTA', 'Abierto'].includes(String(s.estado || ''));
+          if (!isOpen || String(s.sucursalId || '1') !== String(saleData.sucursalId || '1')) return s;
+
+          const nextSession = { ...s };
+          if (metodoAdelanto === 'Efectivo') {
+            nextSession.efectivoVentas = Number(((Number(s.efectivoVentas) || 0) + adelantoPagadoHoy).toFixed(2));
+          } else if (metodoAdelanto === 'Yape/Plin') {
+            nextSession.yapePlinVentas = Number(((Number(s.yapePlinVentas) || 0) + adelantoPagadoHoy).toFixed(2));
+          } else if (metodoAdelanto === 'Tarjeta') {
+            nextSession.tarjetaVentas = Number(((Number(s.tarjetaVentas) || 0) + adelantoPagadoHoy).toFixed(2));
+          } else if (metodoAdelanto === 'Transferencia') {
+            nextSession.transferenciaVentas = Number(((Number(s.transferenciaVentas) || 0) + adelantoPagadoHoy).toFixed(2));
+          }
+
+          const ingresosPorMetodo = { ...(s.ingresosPorMetodo || {}) };
+          ingresosPorMetodo[metodoAdelanto] = Number(((Number(ingresosPorMetodo[metodoAdelanto]) || 0) + adelantoPagadoHoy).toFixed(2));
+          nextSession.ingresosPorMetodo = ingresosPorMetodo;
+
+          const movimientosCaja = Array.isArray(s.movimientosCaja) ? [...s.movimientosCaja] : [];
+          movimientosCaja.push({
+            id: `mov-adelanto-${Date.now()}`,
+            fecha: new Date().toISOString(),
+            tipo: 'INGRESO_ADELANTO_CREDITO',
+            comprobanteId: saleId,
+            metodoPago: metodoAdelanto,
+            monto: adelantoPagadoHoy,
+            glosa: `Adelanto de venta a crédito ${saleId} (${metodoAdelanto})`,
+          });
+          nextSession.movimientosCaja = movimientosCaja;
+
+          return nextSession;
+        });
+        localStorage.setItem('ersoft_caja_sesiones', JSON.stringify(updatedSesiones));
+      } catch (e) {
+        console.error('Error sumando adelanto a sesión de Caja:', e);
+      }
+    }
+
+    if (typeof refreshFinanzas === 'function') {
+      refreshFinanzas();
+    }
+  };
+
   const saveComprobante = () => {
     if (savedRef.current) return true;
     if (!can('ventas_caja', 'CREAR')) { setSaleError('No tienes permiso para emitir ventas.'); return false; }
+    try { assertCanOperatePOS(saleData.sucursalId); } catch (error) { setSaleError(error.message); return false; }
     const validation = validateSale(saleData, empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION');
     if (validation) { setSaleError(validation); return false; }
     const required = new Map();
+    const requiredVariants = new Map();
     for (const { item, qty } of cart) {
       const isService = item._type === 'Servicio';
       const found = findCatalogItem(item);
@@ -1631,8 +2710,17 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
         setSaleError(`Revisa el ítem ${item.nombre}: no corresponde al catálogo de esta sucursal.`); return false;
       }
       if (!isService) {
-        const needed = (required.get(found.id) || 0) + qty; required.set(found.id, needed);
+        const needed = Number(((required.get(found.id) || 0) + qty).toFixed(3));
+        required.set(found.id, needed);
         if (needed > Number(found.stock || 0)) { setSaleError(`Stock insuficiente: ${item.nombre}.`); return false; }
+        if (item.varianteId && Array.isArray(found.variantes)) {
+          const targetVar = found.variantes.find(v => String(v.id) === String(item.varianteId));
+          const varNeeded = Number(((requiredVariants.get(item.varianteId) || 0) + qty).toFixed(3));
+          requiredVariants.set(item.varianteId, varNeeded);
+          if (!targetVar || varNeeded > Number(targetVar.stock || 0)) {
+            setSaleError(`Stock insuficiente en la variante seleccionada: ${item.nombre}.`); return false;
+          }
+        }
       }
     }
     if (!cart.length) { setSaleError('El carrito está vacío.'); return false; }
@@ -1641,7 +2729,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     }
     const saleId = getSaleId();
     const igvPct = 18;
-    const totalVal = saleData?.total || 0;
+    const totalVal = Number((saleData?.total || 0).toFixed(2));
     const opGravadaVal = totalVal / (1 + (igvPct / 100));
     const igvMontoVal = totalVal - opGravadaVal;
 
@@ -1653,14 +2741,28 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
       sucursalId: saleData.sucursalId,
       condicion_pago: saleData.condicion_pago,
       fecha_vencimiento: saleData.fecha_vencimiento,
+      adelanto_monto: saleData.condicion_pago === 'CREDITO' ? creditSummary.adelantoPagadoHoy : 0,
+      adelanto_metodo: saleData.condicion_pago === 'CREDITO' && creditSummary.adelantoPagadoHoy > 0 ? (saleData.adelanto_metodo || 'Efectivo') : null,
+      saldo_pendiente: saleData.condicion_pago === 'CREDITO' ? creditSummary.saldoPendienteCredito : 0,
       modo_facturacion: empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION',
       cliente: saleData?.client || null,
       vendedor: user?.name || user?.username || 'Vendedor',
       items: cart.map(({ item, qty }) => {
         const found = findCatalogItem(item);
         return {
-          id: found?.id ?? item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
-          _type: item._type, tipo: item._type, costo: Number(found?.costo ?? item.costo ?? 0),
+          id: found?.id ?? item.id,
+          varianteId: item.varianteId || null,
+          varianteTalla: item.varianteTalla || null,
+          varianteColor: item.varianteColor || null,
+          nombre: item.nombre,
+          precio: parseFloat(item.precio || 0),
+          qty,
+          unidad_medida: getUnitLabel(item),
+          permite_decimales: allowsDecimals(item),
+          subtotal: calcExactSubtotal(qty, item.precio),
+          _type: item._type,
+          tipo: item._type,
+          costo: Number(found?.costo ?? item.costo ?? 0),
         };
       }),
       total: totalVal,
@@ -1683,7 +2785,36 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     };
     try {
       const created = registrarVenta(record);
-      if (created) deductStock();
+      if (created) {
+        if (saleData.condicion_pago === 'CREDITO') {
+          applyCreditAdvanceAndCxC(saleId, totalVal);
+        } else if (typeof refreshFinanzas === 'function') {
+          // Sync cash sale to active Caja session as well
+          try {
+            const rawSesiones = JSON.parse(localStorage.getItem('ersoft_caja_sesiones') || '[]');
+            const updatedSesiones = rawSesiones.map(s => {
+              const isOpen = ['ABIERTA', 'Abierto'].includes(String(s.estado || ''));
+              if (!isOpen || String(s.sucursalId || '1') !== String(saleData.sucursalId || '1')) return s;
+              const nextSession = { ...s };
+              if (selectedMethod === 'cash') {
+                nextSession.efectivoVentas = Number(((Number(s.efectivoVentas) || 0) + totalVal).toFixed(2));
+              } else if (selectedMethod === 'digital') {
+                nextSession.yapePlinVentas = Number(((Number(s.yapePlinVentas) || 0) + totalVal).toFixed(2));
+              } else if (selectedMethod === 'pos') {
+                nextSession.tarjetaVentas = Number(((Number(s.tarjetaVentas) || 0) + totalVal).toFixed(2));
+              } else if (selectedMethod === 'bank') {
+                nextSession.transferenciaVentas = Number(((Number(s.transferenciaVentas) || 0) + totalVal).toFixed(2));
+              }
+              return nextSession;
+            });
+            localStorage.setItem('ersoft_caja_sesiones', JSON.stringify(updatedSesiones));
+          } catch {
+            // ignore storage errors
+          }
+          refreshFinanzas();
+        }
+        deductStock(saleId);
+      }
       savedRef.current = true;
       return true;
     } catch (error) { setSaleError(error.message); return false; }
@@ -1695,16 +2826,89 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     ? 'border-gray-600 bg-gray-800 hover:border-gray-400'
     : 'border-gray-300 bg-white hover:border-gray-500';
 
-  /* ── helpers ── */
-  const deductStock = () => {
-    const changes = cart
-      .filter(({ item }) => item._type === 'Producto')
-      .map(({ item, qty }) => {
+  /* ── helpers: deduct stock (supports variants, decimals, ventas_acumuladas, and RN-05 Kardex) ── */
+  const deductStock = (saleId) => {
+    try {
+      const savedProds = JSON.parse(localStorage.getItem('ersoft_productos') || '[]');
+      const savedServs = JSON.parse(localStorage.getItem('ersoft_servicios') || '[]');
+      let prodsModified = false;
+      let servsModified = false;
+
+      cart.forEach(({ item, qty }) => {
+        const isService = item._type === 'Servicio';
         const found = findCatalogItem(item);
-        return found ? { id: found.id, delta: -qty } : null;
-      })
-      .filter(Boolean);
-    if (changes.length > 0) bulkUpdateStock(changes);
+        if (!found) return;
+
+        if (isService) {
+          // RN-05: SERVICIO never touches kardex_movimiento or stock, only increments ventas_acumuladas
+          const idx = savedServs.findIndex(s => String(s.id) === String(found.id));
+          if (idx !== -1) {
+            savedServs[idx] = {
+              ...savedServs[idx],
+              ventas_acumuladas: Number(((Number(savedServs[idx].ventas_acumuladas) || 0) + Number(qty || 0)).toFixed(3)),
+            };
+            servsModified = true;
+          }
+        } else {
+          const idx = savedProds.findIndex(p => String(p.id) === String(found.id));
+          if (idx !== -1) {
+            const currentProd = savedProds[idx];
+            const prevStock = Number(currentProd.stock || 0);
+            const nextStock = Math.max(0, Number((prevStock - Number(qty || 0)).toFixed(3)));
+            let nextVariantes = currentProd.variantes;
+            if (item.varianteId && Array.isArray(currentProd.variantes)) {
+              nextVariantes = currentProd.variantes.map(v => {
+                if (String(v.id) !== String(item.varianteId)) return v;
+                const vPrev = Number(v.stock || 0);
+                return { ...v, stock: Math.max(0, Number((vPrev - Number(qty || 0)).toFixed(3))) };
+              });
+            }
+            savedProds[idx] = {
+              ...currentProd,
+              stock: nextStock,
+              variantes: nextVariantes,
+              ventas_acumuladas: Number(((Number(currentProd.ventas_acumuladas) || 0) + Number(qty || 0)).toFixed(3)),
+            };
+            prodsModified = true;
+
+            if (typeof addKardexMovimiento === 'function') {
+              const lot = lotes.find(l => String(l.id) === String(currentProd.loteId));
+              addKardexMovimiento({
+                productoId: currentProd.id,
+                productoNombre: item.nombre,
+                almacenId: lot?.almacenId || '',
+                loteId: currentProd.loteId || '',
+                sucursalId: saleData?.sucursalId || '1',
+                tipoMovimiento: 'VENTA',
+                cantidad: Number(qty || 0),
+                stockAnterior: prevStock,
+                stockResultante: nextStock,
+                costoUnitario: Number(currentProd.costo || 0),
+                referenciaId: saleId,
+                glosa: `Venta POS ${saleId}${item.varianteId ? ` (Talla ${item.varianteTalla} / ${item.varianteColor})` : ''}`,
+              });
+            }
+          } else {
+            bulkUpdateStock([{ id: found.id, delta: -qty }]);
+          }
+        }
+      });
+
+      if (prodsModified) localStorage.setItem('ersoft_productos', JSON.stringify(savedProds));
+      if (servsModified) localStorage.setItem('ersoft_servicios', JSON.stringify(savedServs));
+      if ((prodsModified || servsModified) && typeof refreshData === 'function') {
+        refreshData();
+      }
+    } catch {
+      const changes = cart
+        .filter(({ item }) => item._type === 'Producto')
+        .map(({ item, qty }) => {
+          const found = findCatalogItem(item);
+          return found ? { id: found.id, delta: -qty } : null;
+        })
+        .filter(Boolean);
+      if (changes.length > 0) bulkUpdateStock(changes);
+    }
   };
 
   const openTicket = () => {
@@ -1714,7 +2918,6 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     const html = buildTicketHTML(empresa, cart, saleData, effectiveMethod, saleId, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
-    // Deduct stock exactly once when ticket is generated
     setTicketGenerated(true);
     setWarnNoTicket(false);
     setShowQrModal(false);
@@ -1722,8 +2925,6 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
 
   const handleFinalizar = () => {
     if (!ticketGenerated) { setWarnNoTicket(true); return; }
-    // Stock was already deducted when ticket was generated.
-    // Use hard reload so wizard state fully resets for the next sale.
     window.location.replace('/ventas');
   };
 
@@ -1731,10 +2932,9 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     if (!phone.trim()) return;
     if (!saveComprobante()) return;
     const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'cliente';
-    const items = cart.map(({ item, qty }) => `• ${item.nombre} x${qty} = S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`).join('%0A');
+    const items = cart.map(({ item, qty }) => `• ${item.nombre} x${qty} ${getUnitLabel(item)} = S/. ${calcExactSubtotal(qty, item.precio).toFixed(2)}`).join('%0A');
     const msg = `*Comprobante de compra - ${empresa?.razonSocial || 'ERSOFT'}*%0AFecha: ${new Date().toLocaleString('es-PE')}%0ACliente: ${clientName}%0A%0A${items}%0A%0A*TOTAL: S/. ${(saleData?.total || 0).toFixed(2)}*%0A%0AGracias por su compra.`;
     window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${msg}`, '_blank');
-    // Deduct stock exactly once when message/ticket is sent
     setShowPhoneModal(false);
     setTicketGenerated(true);
     setWarnNoTicket(false);
@@ -1744,9 +2944,9 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
   const renderRightPanel = () => {
     if (ticketGenerated) return (
       <div className="text-center px-8 space-y-6">
-        <p className={`text-sm italic ${subTx}`}>Pago confirmed, puedes revisar el ticket en TBF</p>
+        <p className={`text-sm italic ${subTx}`}>Pago confirmado, puedes revisar el ticket en TBF</p>
         <div className="text-5xl">😊</div>
-        <button onClick={handleFinalizar}
+        <button type="button" onClick={handleFinalizar}
           className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full tracking-widest text-sm">
           FINALIZAR
         </button>
@@ -1759,13 +2959,20 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
       </div>
     );
     if (!selectedMethod) return (
-      <div className="text-center px-8 space-y-4">
+      <div className="text-center px-8 space-y-4 w-full max-w-xs">
         <p className={`text-sm italic ${subTx}`}>Seleccione un medio de pago y confirme la operación</p>
         <div className="text-4xl opacity-40">🙂</div>
+        <Btn
+          type="button"
+          variant="secondary"
+          className="w-full rounded-full mt-2"
+          onClick={handleSaveAsQuoteToCRM}
+        >
+          <FaPaperPlane className="text-xs" /> Guardar como Cotización en CRM
+        </Btn>
       </div>
     );
 
-    // Verify if selected method is active
     const isSelectedMethodActive = metodosPago.find(m => m.id === selectedMethod)?.activo !== false;
     if (!isSelectedMethodActive) {
       return (
@@ -1780,33 +2987,45 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
       );
     }
 
-    // Method selected, ticket not yet generated
     const isCashInsufficient = selectedMethod === 'cash' && (!Number.isFinite(Number(montoRecibido)) || Number(montoRecibido) < saleData.total);
 
     return (
-      <div className="text-center px-8 space-y-6">
+      <div className="text-center px-8 space-y-4 w-full max-w-sm">
         <p className={`text-sm italic text-center ${subTx}`}>
           Verifica que el pago se haya completado y se haya generado el comprobante o ticket
         </p>
         <div className="text-3xl">👀</div>
-        {selectedMethod === 'digital' ? (
-          <button onClick={() => setShowQrModal(true)}
-            className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full tracking-widest text-sm">
-            GENERAR CODIGO QR
-          </button>
-        ) : (
-          <button
-            onClick={openTicket}
-            disabled={isCashInsufficient}
-            className={`w-full py-3 font-bold rounded-full tracking-widest text-sm transition-colors ${
-              isCashInsufficient 
-                ? 'bg-gray-400 text-gray-200 cursor-not-allowed' 
-                : 'bg-[#1a1a1a] hover:bg-gray-800 text-white'
-            }`}
+        <div className="space-y-2.5">
+          {selectedMethod === 'digital' ? (
+            <button type="button" onClick={() => setShowQrModal(true)}
+              className="w-full py-3 bg-[#1a1a1a] hover:bg-gray-800 text-white font-bold rounded-full tracking-widest text-sm">
+              GENERAR CODIGO QR
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={openTicket}
+              disabled={isCashInsufficient}
+              className={`w-full py-3 font-bold rounded-full tracking-widest text-sm transition-colors ${
+                isCashInsufficient
+                  ? 'bg-gray-400 text-gray-200 cursor-not-allowed'
+                  : 'bg-[#1a1a1a] hover:bg-gray-800 text-white'
+              }`}
+            >
+              GENERAR TICKET
+            </button>
+          )}
+
+          {/* Feature 5: Botón secundario "Guardar como Cotización en CRM" junto al botón de emitir comprobante */}
+          <Btn
+            type="button"
+            variant="secondary"
+            className="w-full rounded-full"
+            onClick={handleSaveAsQuoteToCRM}
           >
-            GENERAR TICKET
-          </button>
-        )}
+            <FaPaperPlane className="text-xs" /> Guardar como Cotización en CRM
+          </Btn>
+        </div>
       </div>
     );
   };
@@ -1815,13 +3034,82 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
     <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
       {saleError && <p role="alert" className="px-8 py-3 text-sm text-red-400">{saleError}</p>}
-      {saleData.condicion_pago === 'CREDITO' && <Card className={`m-6 space-y-3 ${ds.text}`}>
-        <p className="font-bold">Venta a crédito · {saleData.fecha_vencimiento}</p>
-        <p className={`text-sm ${ds.muted}`}>Se registrará una cuenta por cobrar. El cobro se registra posteriormente en Rendiciones.</p>
-        <Btn disabled={ticketGenerated} onClick={openTicket}>{ticketGenerated ? 'Cuenta por cobrar registrada' : 'Confirmar venta a crédito'}</Btn>
-        {ticketGenerated && <Btn variant="secondary" onClick={handleFinalizar}>Finalizar</Btn>}
-        {!ticketGenerated && <Btn variant="ghost" onClick={onBack}>Volver a datos del cliente</Btn>}
-      </Card>}
+
+      {crmQuoteFeedback && (
+        <div className="px-6 pt-4">
+          <Card className="border-emerald-500/40 bg-emerald-500/10 space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <div className="flex items-center gap-2 text-emerald-500 font-bold text-sm">
+                <FaCheckCircle />
+                <span>Cotización guardada en CRM (Etapa: COTIZADO)</span>
+              </div>
+              <Badge color="green" size="sm">Seguimiento en Calendario: {crmQuoteFeedback.fechaAlerta}</Badge>
+            </div>
+            <p className={`text-xs ${ds.text}`}>
+              Cliente: <strong>{crmQuoteFeedback.cliente}</strong> · Monto estimado: <strong>S/ {crmQuoteFeedback.total}</strong> · Alerta creada en el Calendario Operativo.
+            </p>
+            <div className="flex gap-2 pt-1">
+              <Btn type="button" size="sm" variant="secondary" onClick={() => navigate('/crm')}>
+                Ver en CRM
+              </Btn>
+              <Btn type="button" size="sm" variant="ghost" onClick={() => navigate('/calendario')}>
+                Ver en Calendario
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      )}
+
+      {saleData.condicion_pago === 'CREDITO' && (
+        <Card className={`m-6 space-y-4 ${ds.text}`}>
+          <div className="flex items-center justify-between gap-2 flex-wrap">
+            <div>
+              <p className="font-bold text-base">Venta a Crédito · Vence: {saleData.fecha_vencimiento}</p>
+              <p className={`text-sm ${ds.muted}`}>
+                {creditSummary.adelantoPagadoHoy > 0
+                  ? `El adelanto de S/ ${creditSummary.adelantoPagadoHoy.toFixed(2)} (${saleData.adelanto_metodo || 'Efectivo'}) ingresará hoy a Caja y se creará una Cuenta por Cobrar en estado PARCIAL por S/ ${creditSummary.saldoPendienteCredito.toFixed(2)}.`
+                  : 'Se registrará una Cuenta por Cobrar en estado PENDIENTE por el saldo total. El cobro se registra posteriormente en Rendiciones.'}
+              </p>
+            </div>
+            <Badge color={creditSummary.adelantoPagadoHoy > 0 ? 'amber' : 'blue'}>
+              Estado CxC: {creditSummary.estadoCuenta}
+            </Badge>
+          </div>
+
+          {/* Resumen de Facturación al Crédito (Feature 4) */}
+          <div className={`p-4 rounded-xl border text-sm space-y-2 ${
+            theme === 'dark' ? 'bg-slate-900/60 border-slate-700' : 'bg-slate-50 border-slate-200'
+          }`}>
+            <div className="flex justify-between">
+              <span className={ds.muted}>Total Comprobante:</span>
+              <span className="font-bold">S/. {creditSummary.totalComprobante.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between">
+              <span className="text-emerald-500 font-semibold">
+                Adelanto Pagado Hoy (entra a Caja{creditSummary.adelantoPagadoHoy > 0 ? ` · ${saleData.adelanto_metodo || 'Efectivo'}` : ''}):
+              </span>
+              <span className="font-bold text-emerald-500">S/. {creditSummary.adelantoPagadoHoy.toFixed(2)}</span>
+            </div>
+            <div className="flex justify-between border-t pt-2 border-dashed border-slate-500/40">
+              <span className="text-amber-500 font-bold">Saldo Pendiente a Crédito (va a Cuentas por Cobrar):</span>
+              <span className="font-extrabold text-amber-500">S/. {creditSummary.saldoPendienteCredito.toFixed(2)}</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3">
+            <Btn type="button" disabled={ticketGenerated} onClick={openTicket}>
+              {ticketGenerated ? 'Cuenta por cobrar registrada' : 'Confirmar venta a crédito'}
+            </Btn>
+            {!ticketGenerated && (
+              <Btn type="button" variant="secondary" onClick={handleSaveAsQuoteToCRM}>
+                <FaPaperPlane className="text-xs" /> Guardar como Cotización en CRM
+              </Btn>
+            )}
+            {ticketGenerated && <Btn type="button" variant="secondary" onClick={handleFinalizar}>Finalizar</Btn>}
+            {!ticketGenerated && <Btn type="button" variant="ghost" onClick={onBack}>Volver a datos del cliente</Btn>}
+          </div>
+        </Card>
+      )}
 
       {/* Body */}
       <div className={saleData.condicion_pago === 'CREDITO' ? 'hidden' : 'flex flex-1 overflow-hidden'}>
@@ -1832,6 +3120,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
             return (
               <div key={pm.key} className="w-full">
                 <button
+                  type="button"
                   disabled={ticketGenerated}
                   onClick={() => { setSelectedMethod(pm.key); setWarnNoTicket(false); }}
                   className={`w-full flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left relative
@@ -1850,11 +3139,8 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
                   </div>
                   {pm.key === 'digital' && (
                     <div className="flex items-center flex-wrap gap-3 mt-3">
-                      {/* Yape */}
                       <span className="px-2 py-1 rounded-lg font-black text-sm" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
-                      {/* Plin */}
                       <span className="px-2 py-1 rounded-full font-black text-sm" style={{background:'#00c896',color:'#fff'}}>plin</span>
-                      {/* izipay */}
                       <span className="px-2 py-1 rounded-sm font-black text-sm" style={{background:'#f04e37',color:'#fff'}}>izipay</span>
                     </div>
                   )}
@@ -1892,7 +3178,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
               </div>
             );
           })}
-          <button disabled={ticketGenerated} onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
+          <button type="button" disabled={ticketGenerated} onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
             ← Volver a datos del cliente
           </button>
         </div>
@@ -1905,21 +3191,17 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
         </div>
       </div>
 
-
-
       {/* ── QR Modal ── */}
       {showQrModal && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
           <div className={`relative w-full max-w-md rounded-3xl shadow-2xl p-8 flex flex-col items-center gap-5 ${
             theme === 'dark' ? 'bg-gray-900' : 'bg-white'
           }`}>
-            {/* Close */}
-            <button onClick={() => setShowQrModal(false)}
+            <button type="button" onClick={() => setShowQrModal(false)}
               className="absolute top-4 right-4 w-8 h-8 rounded-full bg-gray-800 text-white flex items-center justify-center hover:bg-gray-600">
               ✕
             </button>
 
-             {/* QR Image */}
             <div className="w-64 h-64 rounded-2xl border-4 border-gray-300 flex items-center justify-center overflow-hidden bg-white">
               {metodosPago.find(m => m.id === 'digital')?.qrPath
                 ? <img src={metodosPago.find(m => m.id === 'digital').qrPath} alt="QR pago" className="w-full h-full object-contain" />
@@ -1930,24 +3212,21 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
               }
             </div>
 
-            {/* Amount */}
             <p className={`text-base font-bold ${text}`}>
               Monto: &nbsp; <span className="text-xl">S/. {(saleData?.total || 0).toFixed(2)}</span>
             </p>
 
-            {/* Payment logos */}
             <div className="flex items-center gap-6">
               <span className="px-3 py-2 rounded-xl font-black text-lg" style={{background:'#7022f3',color:'#fff'}}>S/ yape</span>
               <span className="px-3 py-2 rounded-full font-black text-lg" style={{background:'#00c896',color:'#fff'}}>plin</span>
             </div>
 
-            {/* Action buttons */}
             <div className="flex gap-3 w-full mt-2">
-              <button onClick={openTicket}
+              <button type="button" onClick={openTicket}
                 className="flex-1 py-3 bg-[#1a1a1a] hover:bg-gray-700 text-white font-bold rounded-full text-sm tracking-wider">
                 GENERAR TICKET
               </button>
-              <button onClick={handleDupPantalla}
+              <button type="button" onClick={handleDupPantalla}
                 className={`flex-1 py-3 border-2 font-bold rounded-full text-sm tracking-wide ${
                   theme === 'dark' ? 'border-gray-500 text-gray-200 hover:bg-gray-700' : 'border-gray-400 text-gray-800 hover:bg-gray-100'
                 }`}>
@@ -1977,11 +3256,11 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
               }`}
             />
             <div className="flex gap-3">
-              <button onClick={() => setShowPhoneModal(false)}
+              <button type="button" onClick={() => setShowPhoneModal(false)}
                 className={`flex-1 py-2.5 border rounded-xl font-semibold text-sm ${
                   theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 hover:bg-gray-100'
                 }`}>Cancelar</button>
-              <button onClick={handleSendWhatsApp}
+              <button type="button" onClick={handleSendWhatsApp}
                 className="flex-1 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl text-sm">
                 ENVIAR
               </button>
@@ -1999,25 +3278,130 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
 const Ventas = () => {
   const { theme } = useTheme();
   const ds = useDS();
+  const navigate = useNavigate();
   const { isGlobalScope, effectiveSucursalId } = usePermission();
   const { posPreload, limpiarEnvioAPOS } = useCRM();
   const { productos, servicios } = useInventario();
+  const {
+    cajaSesiones,
+    getActiveCajaByBranch,
+    isCajaBlockedForCurrentUser,
+    terminalInfo,
+    refreshFinanzas,
+  } = useFinanzas();
+
   const [preload] = useState(() => posPreload && (isGlobalScope || String(posPreload.sucursalId) === String(effectiveSucursalId)) ? posPreload : null);
-  const [sucursalId, setSucursalId] = useState(() => String(preload?.sucursalId || effectiveSucursalId || getBranches()[0]?.id || ''));
+  const [sucursalId, setSucursalId] = useState(() => String(preload?.sucursalId || effectiveSucursalId || getBranches()[0]?.id || '1'));
   const consumed = useRef(false);
+
   useEffect(() => {
     if (preload && !consumed.current) { consumed.current = true; limpiarEnvioAPOS(); }
   }, [preload, limpiarEnvioAPOS]);
+
+  // Synchronize FinanzasContext with localStorage sessions opened/closed in Caja.jsx
+  useEffect(() => {
+    if (typeof refreshFinanzas === 'function') {
+      refreshFinanzas();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sucursalId]);
+
   const [step, setStep] = useState(1); // 1 | 2 | 3
   const [cart, setCart] = useState(() => (preload?.cart || []).reduce((rows, line) => {
     const type = line.item._type || (String(line.item.tipo).toUpperCase() === 'SERVICIO' ? 'Servicio' : 'Producto');
     const source = (type === 'Servicio' ? servicios : productos).find(p => String(p.id) === String(line.item.id) && p.nombre === line.item.nombre);
-    const item = { ...line.item, ...source, precio: line.item.precio, _type: type };
-    const found = rows.find(row => row.item.id === item.id && row.item._type === type);
-    if (found) found.qty += line.qty; else rows.push({ item, qty: line.qty });
+    const baseItem = { ...source, ...line.item, precio: line.item.precio, _type: type };
+    const isDec = allowsDecimals(baseItem);
+    const qty = normalizeQty(line.qty, isDec);
+    const key = baseItem.varianteId ? `${type}-${baseItem.parentProductId || baseItem.id}-var-${baseItem.varianteId}` : `${type}-${baseItem.id}`;
+    const found = rows.find(row => {
+      const rKey = row.item.varianteId ? `${row.item._type}-${row.item.parentProductId || row.item.id}-var-${row.item.varianteId}` : `${row.item._type}-${row.item.id}`;
+      return rKey === key;
+    });
+    if (found) found.qty = normalizeQty(found.qty + qty, isDec);
+    else if (qty > 0) rows.push({ item: baseItem, qty });
     return rows;
   }, []));
   const [saleData, setSaleData] = useState(null);
+
+  // Feature 1: Bloqueo Estricto de Ventas sin Caja Abierta o desde Otro Dispositivo
+  const activeCaja = typeof getActiveCajaByBranch === 'function' ? getActiveCajaByBranch(sucursalId) : null;
+  const blockedCheck = typeof isCajaBlockedForCurrentUser === 'function' ? isCajaBlockedForCurrentUser(sucursalId) : { blocked: false };
+  const branchCanOperate = Boolean(activeCaja && !blockedCheck.blocked);
+  const posAccess = resolvePosAccessState({
+    canOperatePOS: branchCanOperate,
+    isTerminalBlocked: blockedCheck.blocked,
+    activeBranchCajaSesion: activeCaja,
+    cajaSesiones,
+    sucursalId,
+    terminalInfo,
+  });
+
+  const branches = getBranches();
+  const currentBranchName = branches.find(b => String(b.id) === String(sucursalId))?.nombre || `Sucursal #${sucursalId}`;
+
+  if (posAccess.locked) {
+    return (
+      <div className={`flex flex-col flex-1 min-h-0 -m-6 ${ds.pageBg}`}>
+        <PageHeader
+          onBack={() => navigate('/principal')}
+          right={isGlobalScope && (
+            <select
+              aria-label="Sucursal"
+              value={sucursalId}
+              onChange={e => setSucursalId(e.target.value)}
+              className={`px-3 py-1.5 rounded-lg border text-xs ${ds.input}`}
+            >
+              {branches.map(b => <option key={b.id} value={b.id}>{b.nombre}</option>)}
+            </select>
+          )}
+        />
+        <div className="flex-1 flex items-center justify-center p-6">
+          <Card className="max-w-lg w-full text-center p-8 space-y-5 shadow-xl">
+            <div className="w-16 h-16 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-500 flex items-center justify-center mx-auto">
+              <FaLock size={28} />
+            </div>
+
+            <div className="flex justify-center">
+              <Badge dot color={posAccess.reasonType === 'OTHER_DEVICE' ? 'red' : 'amber'} size="md">
+                {posAccess.reasonType === 'CLOSED' ? 'Caja cerrada' : 'Sesión no disponible'} · {currentBranchName}
+              </Badge>
+            </div>
+
+            <div className="space-y-2">
+              <h2 className={`text-xl font-extrabold tracking-tight ${ds.text}`}>
+                {posAccess.reasonTitle}
+              </h2>
+              <p className={`text-sm leading-relaxed ${ds.muted}`}>
+                {posAccess.reasonType === 'CLOSED' ? 'Abre tu caja para iniciar ventas. Podrás operar hasta cerrar el turno.' : 'La caja está reservada por otro usuario, dispositivo o pestaña. Usa la sesión que abrió el turno.'}
+              </p>
+            </div>
+
+            <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
+              <Btn
+                type="button"
+                variant="primary"
+                size="lg"
+                onClick={() => navigate('/caja')}
+                className="w-full sm:w-auto"
+              >
+                <FaCashRegister /> Ir a Gestión de Caja
+              </Btn>
+              <Btn
+                type="button"
+                variant="secondary"
+                size="lg"
+                onClick={() => navigate('/principal')}
+                className="w-full sm:w-auto"
+              >
+                Volver al Inicio
+              </Btn>
+            </div>
+          </Card>
+        </div>
+      </div>
+    );
+  }
 
   const sharedProps = { theme, pageBg: ds.pageBg, sucursalId, onSucursalChange: setSucursalId, preloadedClient: preload?.preloadedClient, crmPreloadInfo: preload };
 

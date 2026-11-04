@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState } from 'react';
 import { FaPlus, FaReceipt } from 'react-icons/fa';
 import { useDS } from '../../hooks/useDS';
 import { useAuth } from '../../context/AuthContext';
@@ -11,14 +11,14 @@ import Input from '../ui/Input';
 import EmptyState from '../ui/EmptyState';
 import GastoRendicionModal from './GastoRendicionModal';
 import {
-  MODULO_RBAC, loadSucursales, formatPEN, labelCategoria, sucursalNombre,
+  loadSucursales, formatPEN, labelCategoria, sucursalNombre,
   ESTADO_RENDICION_COLOR,
 } from './rendicionesUtils';
 
 const ESTADOS = ['TODOS', 'PENDIENTE_APROBACION', 'APROBADO', 'RECHAZADO'];
 
 /** Lista de rendiciones de gasto. Aprobar/Rechazar solo con permiso APROBAR_RENDICION (MASTER / ADMINISTRADOR). */
-const RendicionesGastoPanel = () => {
+const RendicionesGastoPanel = ({ hideCreate = false, branchId = 'TODAS' }) => {
   const ds = useDS();
   const { user } = useAuth();
   const { can, effectiveSucursalId } = usePermission();
@@ -35,18 +35,16 @@ const RendicionesGastoPanel = () => {
   const PAGE_SIZE = 25;
   const [currentPage, setCurrentPage] = useState(1);
 
-  const canCrear = can(MODULO_RBAC, 'CREAR');
-  const canAprobar = can(MODULO_RBAC, 'APROBAR_RENDICION');
+  const canCrear = can('tesoreria_gastos', 'CREAR');
+  const canAprobar = can('tesoreria_gastos', 'APROBAR_RENDICION');
 
   const filas = useMemo(() => rendicionesGastos
     .filter((r) => !effectiveSucursalId || String(r.sucursal_id) === String(effectiveSucursalId))
+    .filter((r) => branchId === 'TODAS' || String(r.sucursal_id) === branchId)
     .filter((r) => estadoFiltro === 'TODOS' || r.estado === estadoFiltro)
     .sort((a, b) => String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud))),
-  [rendicionesGastos, estadoFiltro, effectiveSucursalId]);
+  [rendicionesGastos, estadoFiltro, effectiveSucursalId, branchId]);
 
-  useEffect(() => {
-    setCurrentPage(1);
-  }, [estadoFiltro, effectiveSucursalId]);
 
   const totalPages = Math.max(1, Math.ceil(filas.length / PAGE_SIZE));
   const safePage = Math.min(currentPage, totalPages);
@@ -72,7 +70,7 @@ const RendicionesGastoPanel = () => {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div className="flex gap-1.5 flex-wrap">
           {ESTADOS.map((e) => (
-            <button key={e} type="button" onClick={() => setEstadoFiltro(e)}
+            <button key={e} type="button" onClick={() => { setEstadoFiltro(e); setCurrentPage(1); }}
               className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
                 estadoFiltro === e ? 'bg-yellow-500 border-yellow-500 text-black' : `${ds.cardBg} ${ds.muted} hover:border-yellow-500/50`
               }`}>
@@ -80,7 +78,7 @@ const RendicionesGastoPanel = () => {
             </button>
           ))}
         </div>
-        {canCrear && <Btn leftIcon={<FaPlus size={11} />} onClick={() => setShowModal(true)}>Nueva rendición</Btn>}
+        {canCrear && !hideCreate && <Btn leftIcon={<FaPlus size={11} />} onClick={() => setShowModal(true)}>Nueva rendición</Btn>}
       </div>
 
       {!canAprobar && (

@@ -1,6 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { logAuditAction } from '../data/simulatedAudit';
+import { useAuth } from './AuthContext';
+import { usePermission } from '../hooks/usePermission';
+import { isOpenCashSession, findCashSession, canUseCashSession } from '../utils/cashSession';
 import { todayLima } from '../utils/businessData';
 
 const FinanzasContext = createContext();
@@ -40,7 +43,7 @@ export const getTerminalFingerprint = () => {
     const stored = localStorage.getItem(FINGERPRINT_STORAGE_KEY);
     if (stored) {
       const parsed = JSON.parse(stored);
-      if (parsed && parsed.terminal_id) return parsed;
+      if (parsed && parsed.terminal_id) return { ...parsed, ip_detectada: null };
     }
   } catch (e) {
     console.error('Error cargando terminal fingerprint:', e);
@@ -59,9 +62,8 @@ export const getTerminalFingerprint = () => {
   else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
 
   const navegador_so = `${browser} / ${os}`;
-  // Fallback simulado 192.168.1.XX
-  const octet = Math.floor(Math.random() * 80) + 100;
-  const ip_detectada = `192.168.1.${octet}`;
+  // La dirección se obtiene del servidor; nunca se inventa una IP.
+  const ip_detectada = null;
   const randPart = Math.random().toString(36).substring(2, 7).toUpperCase();
   const terminal_id = `TERM-${randPart}`;
 
@@ -329,6 +331,25 @@ const DEFAULT_RENDICIONES_GASTOS = [
 ];
 
 export const FinanzasProvider = ({ children }) => {
+  const { user } = useAuth();
+  const { can, isGlobalScope, effectiveSucursalId } = usePermission();
+  const requireAccess = (module, action, record) => {
+    if (!can(module, action) || (!isGlobalScope && String(record?.sucursal_id ?? record?.sucursalId) !== String(effectiveSucursalId))) {
+      throw new Error('No tienes permiso para esta operación o sucursal.');
+    }
+  };
+  const [ownsPOSLock, setOwnsPOSLock] = useState(false);
+  useEffect(() => {
+    if (!user?.id || !navigator.locks) return;
+    const controller = new AbortController();
+    let release;
+    navigator.locks.request(`ersoft-pos-user-${user.id}`, { signal: controller.signal }, async () => {
+      setOwnsPOSLock(true);
+      await new Promise(resolve => { release = resolve; });
+      setOwnsPOSLock(false);
+    }).catch(error => { if (error.name !== 'AbortError') console.error('No se pudo reservar la sesión POS', error); });
+    return () => { controller.abort(); release?.(); };
+  }, [user?.id]);
   const [ventas, setVentas] = useState(() => load('ersoft_comprobantes', []));
   useEffect(() => {
     const sync = () => setVentas(load('ersoft_comprobantes', []));
@@ -338,7 +359,7 @@ export const FinanzasProvider = ({ children }) => {
   }, []);
 
   // ── 0. Seguridad de Terminal y Detección de Dispositivo / IP (R7) ──
-  const [realTerminal] = useState(() => getTerminalFingerprint());
+  const [realTerminal, setRealTerminal] = useState(() => getTerminalFingerprint());
   const [simularOtroDispositivo, setSimularOtroDispositivoState] = useState(() =>
     load(SIMULATION_STORAGE_KEY, false)
   );
@@ -359,53 +380,42 @@ export const FinanzasProvider = ({ children }) => {
     save(SIMULATION_STORAGE_KEY, val);
   };
 
-  const activeTerminal = simularOtroDispositivo ? SIMULATED_REMOTE_DEVICE : realTerminal;
+  useEffect(() => {
+    const controller = new AbortController();
+    fetch('/api/session/device', { signal: controller.signal, credentials: 'same-origin' })
+      .then(response => { if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Servicio de IP no configurado'); return response.json(); })
+      .then(data => { if (typeof data.ip === 'string') setRealTerminal(previous => ({ ...previous, ip_detectada: data.ip })); })
+      .catch(() => { /* La IP permanece desconocida si no hay servidor configurado. */ });
+    return () => controller.abort();
+  }, []);
+  const activeTerminal = import.meta.env.DEV && simularOtroDispositivo ? SIMULATED_REMOTE_DEVICE : realTerminal;
 
-  // Sucursal activa del usuario autenticado
-  const getActiveBranchId = () => {
-    try {
-      const raw = sessionStorage.getItem('ersoft_user') || localStorage.getItem('ersoft_user');
-      if (raw) {
-        const u = JSON.parse(raw);
-        return String(u.sucursal_id ?? u.sucursalId ?? '1');
-      }
-    } catch (_) {}
-    return '1';
+  const currentBranchId = String(effectiveSucursalId ?? '1');
+  const getActiveCajaByBranch = (branchId) => findCashSession(cajaSesiones, branchId);
+  const activeBranchCajaSesion = getActiveCajaByBranch(currentBranchId);
+  const isCajaBlockedForCurrentUser = (branchId) => ({
+    blocked: !ownsPOSLock || !canUseCashSession(getActiveCajaByBranch(branchId), user, activeTerminal, branchId),
+  });
+  const isTerminalBlocked = Boolean(activeBranchCajaSesion && isCajaBlockedForCurrentUser(currentBranchId).blocked);
+  const canOperatePOS = Boolean(can('ventas_caja', 'CREAR') && activeBranchCajaSesion && !isTerminalBlocked);
+  const assertCanOperatePOS = (branchId) => {
+    const session = findCashSession(load('ersoft_caja_sesiones', []), branchId);
+    if (!can('ventas_caja', 'CREAR') || !ownsPOSLock || !canUseCashSession(session, user, activeTerminal, branchId)) {
+      throw new Error('Abre tu caja en esta terminal y cierra la otra pestaña operativa antes de vender.');
+    }
+    return session;
   };
-
-  const currentBranchId = getActiveBranchId();
-
-  // Sesión activa en la sucursal actual (o sesión abierta general)
-  const activeBranchCajaSesion = cajaSesiones.find(s =>
-    (s.estado === 'Abierto' || s.estado === 'ABIERTA') &&
-    String(s.sucursalId || s.sucursal_id || '1') === String(currentBranchId)
-  ) || cajaSesiones.find(s => s.estado === 'Abierto' || s.estado === 'ABIERTA') || null;
-
-  // ¿Terminal bloqueada para la caja activa?
-  // Si hay una caja abierta y su terminal_id no coincide con el activeTerminal actual
-  const isTerminalBlocked = Boolean(
-    activeBranchCajaSesion &&
-    activeBranchCajaSesion.terminal_id &&
-    activeBranchCajaSesion.terminal_id !== activeTerminal.terminal_id
-  );
-
-  // canOperatePOS: true únicamente si hay caja ABIERTA en la sucursal actual Y el terminal_id / IP coincide con el dispositivo activo
-  const canOperatePOS = Boolean(
-    activeBranchCajaSesion &&
-    (activeBranchCajaSesion.estado === 'Abierto' || activeBranchCajaSesion.estado === 'ABIERTA') &&
-    (!activeBranchCajaSesion.terminal_id || activeBranchCajaSesion.terminal_id === activeTerminal.terminal_id) &&
-    (!activeBranchCajaSesion.ip_detectada || activeBranchCajaSesion.ip_detectada === activeTerminal.ip_detectada || !simularOtroDispositivo) &&
-    !isTerminalBlocked
-  );
+  const syncCajaSessions = () => setCajaSesiones(load('ersoft_caja_sesiones', []));
 
   // Desbloqueo forzado por MASTER
   const desbloquearTerminalMaster = (sessionId, masterUser) => {
+    if (user?.rol !== 'MASTER' || !can('desbloquear_terminal_caja', 'EDITAR')) throw new Error('Solo MASTER puede desbloquear una terminal.');
     const rawSessions = load('ersoft_caja_sesiones', []);
     let prev = null;
     let updated = null;
 
     const next = rawSessions.map(s => {
-      if (s.id === sessionId || (!sessionId && (s.estado === 'Abierto' || s.estado === 'ABIERTA'))) {
+      if (s.id === sessionId && isOpenCashSession(s)) {
         prev = { ...s };
         updated = {
           ...s,
@@ -455,6 +465,9 @@ export const FinanzasProvider = ({ children }) => {
 
   // ── Balance Inicial CRUD ────────────────────────────────────────────
   const addBalanceInicial = (balanceData) => {
+    requireAccess('tesoreria_balance', 'CREAR', balanceData);
+    if (!Number.isFinite(Number(balanceData.monto)) || Number(balanceData.monto) < 0) throw new Error('Monto inicial inválido.');
+    if (balancesIniciales.some(b => b.tipo === balanceData.tipo && String(b.sucursal_id) === String(balanceData.sucursal_id))) throw new Error('Ya existe un asiento inicial de este tipo en la sucursal.');
     const nuevoBalance = {
       ...balanceData,
       id: Date.now(),
@@ -479,6 +492,9 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const updateBalanceInicial = (id, data) => {
+    const current = balancesIniciales.find(row => row.id === id);
+    requireAccess('tesoreria_balance', 'EDITAR', current);
+    requireAccess('tesoreria_balance', 'EDITAR', { ...current, ...data });
     let prevItem = null;
     let nextItem = null;
     const updated = balancesIniciales.map((b) => {
@@ -506,6 +522,7 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const deleteBalanceInicial = (id) => {
+    requireAccess('tesoreria_balance', 'EDITAR', balancesIniciales.find(row => row.id === id));
     const itemToDelete = balancesIniciales.find((b) => b.id === id);
     const updated = balancesIniciales.filter((b) => b.id !== id);
     setBalancesIniciales(updated);
@@ -525,6 +542,7 @@ export const FinanzasProvider = ({ children }) => {
 
   // ── Cuentas por Cobrar y Pagar CRUD y Abonos ─────────────────────────
   const addCuenta = (cuentaData) => {
+    requireAccess(cuentaData.tipo === 'POR_PAGAR' ? 'tesoreria_cxp' : 'ventas_caja', 'CREAR', cuentaData);
     const montoTotal = parseFloat(cuentaData.monto_total) || 0;
     const montoPagado = parseFloat(cuentaData.monto_pagado) || 0;
     const saldoPendiente = Math.max(0, montoTotal - montoPagado);
@@ -534,6 +552,7 @@ export const FinanzasProvider = ({ children }) => {
 
     const nuevaCuenta = {
       ...cuentaData,
+      moneda: cuentaData.moneda || 'PEN',
       id: Date.now(),
       monto_total: montoTotal,
       monto_pagado: montoPagado,
@@ -560,6 +579,10 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const updateCuenta = (id, data) => {
+    const current = cuentasCobrarPagar.find(row => row.id === id);
+    const isScheduleChange = Object.keys(data).every(key => ['fecha_vencimiento', 'tarea_calendario_completada', 'responsable_calendario'].includes(key));
+    requireAccess(isScheduleChange ? 'reprogramar_calendario' : 'rendiciones_cxc_cxp', 'EDITAR', current);
+    if (!isScheduleChange) requireAccess('rendiciones_cxc_cxp', 'EDITAR', { ...current, ...data });
     let prevItem = null;
     let nextItem = null;
     const updated = cuentasCobrarPagar.map((c) => {
@@ -596,6 +619,7 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const deleteCuenta = (id) => {
+    requireAccess('rendiciones_cxc_cxp', 'ANULAR', cuentasCobrarPagar.find(row => row.id === id));
     const itemToDelete = cuentasCobrarPagar.find((c) => c.id === id);
     const updated = cuentasCobrarPagar.filter((c) => c.id !== id);
     setCuentasCobrarPagar(updated);
@@ -618,18 +642,26 @@ export const FinanzasProvider = ({ children }) => {
    * Actualiza montos y estado automáticamente e inserta evento de auditoría.
    */
   const registrarAbonoCuenta = (cuentaId, { monto, metodoPago = 'Efectivo', referencia = '', usuario = 'Usuario' }) => {
-    const abonoMonto = parseFloat(monto);
-    if (!abonoMonto || abonoMonto <= 0) {
+    const freshAccounts = load('ersoft_cuentas_cobrar_pagar', cuentasCobrarPagar);
+    const current = freshAccounts.find(c => c.id === cuentaId);
+    if (!current) throw new Error('La cuenta ya no existe.');
+    requireAccess(current.tipo === 'POR_COBRAR' ? 'tesoreria_cxc' : 'tesoreria_cxp', 'EDITAR', current);
+    if (current.estado === 'ANULADO' || Number(current.saldo_pendiente) <= 0) throw new Error('La cuenta está pagada o anulada.');
+    const abonoMonto = Math.round(Number(monto) * 100) / 100;
+    if (abonoMonto > Number(current.saldo_pendiente)) throw new Error('El abono excede el saldo actualizado.');
+    const cashSession = metodoPago === 'Efectivo' ? assertCanOperatePOS(current.sucursal_id) : null;
+    if (cashSession && current.moneda && current.moneda !== 'PEN') throw new Error('La caja opera en PEN. Registra el abono en otra moneda por transferencia.');
+    if (!Number.isFinite(abonoMonto) || abonoMonto <= 0) {
       throw new Error('El monto del abono debe ser mayor a 0');
     }
 
     let prevCuenta = null;
     let nextCuenta = null;
 
-    const updated = cuentasCobrarPagar.map((c) => {
+    const updated = freshAccounts.map((c) => {
       if (c.id === cuentaId) {
         prevCuenta = { ...c };
-        const nuevoPagado = parseFloat((c.monto_pagado + abonoMonto).toFixed(2));
+        const nuevoPagado = parseFloat((Number(c.monto_pagado) + abonoMonto).toFixed(2));
         const nuevoSaldo = Math.max(0, parseFloat((c.monto_total - nuevoPagado).toFixed(2)));
         let nuevoEstado = nuevoSaldo === 0 ? 'PAGADO' : 'PARCIAL';
 
@@ -637,6 +669,8 @@ export const FinanzasProvider = ({ children }) => {
           id: Date.now(),
           fecha: new Date().toISOString().split('T')[0],
           monto: abonoMonto,
+          caja_id: cashSession?.id,
+          moneda: current.moneda || 'PEN',
           metodo_pago: metodoPago,
           referencia,
           usuario
@@ -686,6 +720,7 @@ export const FinanzasProvider = ({ children }) => {
    * Crear nueva rendición con desglose automático de IGV 18% si tiene crédito fiscal (RN-02).
    */
   const crearRendicion = (rendicionData) => {
+    requireAccess('tesoreria_gastos', 'CREAR', rendicionData);
     const monto = parseFloat(rendicionData.monto) || 0;
     const tieneCreditoFiscal = Boolean(rendicionData.tiene_credito_fiscal_igv);
 
@@ -730,6 +765,7 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const updateRendicion = (id, data) => {
+    requireAccess('tesoreria_gastos', 'EDITAR', rendicionesGastos.find(r => r.id === id));
     let prevItem = null;
     let nextItem = null;
 
@@ -775,6 +811,7 @@ export const FinanzasProvider = ({ children }) => {
   };
 
   const deleteRendicion = (id) => {
+    requireAccess('tesoreria_gastos', 'EDITAR', rendicionesGastos.find(r => r.id === id));
     const itemToDelete = rendicionesGastos.find((r) => r.id === id);
     const updated = rendicionesGastos.filter((r) => r.id !== id);
     setRendicionesGastos(updated);
@@ -797,6 +834,7 @@ export const FinanzasProvider = ({ children }) => {
    * Si es aprobada, cuenta como gasto operativo deducible en el P&G.
    */
   const aprobarRechazarRendicion = (rendicionId, nuevoEstado, motivo = '', usuarioAprobador = 'Administrador') => {
+    requireAccess('tesoreria_gastos', 'APROBAR_RENDICION', rendicionesGastos.find(r => r.id === rendicionId));
     if (!['APROBADO', 'RECHAZADO'].includes(nuevoEstado)) {
       throw new Error('El estado debe ser APROBADO o RECHAZADO');
     }
@@ -839,6 +877,7 @@ export const FinanzasProvider = ({ children }) => {
 
   // ── Resumen Financiero Calculado ───────────────────────────────────
   const registrarVenta = (venta) => {
+    assertCanOperatePOS(venta.sucursal_id || venta.sucursalId || currentBranchId);
     const saved = load('ersoft_comprobantes', []);
     if (saved.some(v => v.id === venta.id)) return false;
     const credit = venta.condicion_pago === 'CREDITO';
@@ -927,6 +966,11 @@ export const FinanzasProvider = ({ children }) => {
         simularOtroDispositivo,
         setSimularOtroDispositivo,
         canOperatePOS,
+        ownsPOSLock,
+        syncCajaSessions,
+        getActiveCajaByBranch,
+        isCajaBlockedForCurrentUser,
+        assertCanOperatePOS,
         isTerminalBlocked,
         activeBranchCajaSesion,
         cajaSesiones,

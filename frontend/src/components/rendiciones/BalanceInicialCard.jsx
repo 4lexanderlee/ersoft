@@ -81,15 +81,15 @@ const BalanceTipoCard = ({ def, registros, sucursalId, puedeEditar }) => {
 };
 
 /** Patrimonio de Apertura por sucursal. RN-01: nunca se suma a ventas operativas. Solo MASTER edita. */
-const BalanceInicialCard = () => {
+const BalanceInicialCard = ({ branchId = 'TODAS' }) => {
   const ds = useDS();
   const { balancesIniciales } = useFinanzas();
-  const { isGlobalScope, effectiveSucursalId } = usePermission();
+  const { can, effectiveSucursalId } = usePermission();
   const sucursales = useMemo(() => loadSucursales(), []);
 
   const visibles = effectiveSucursalId
     ? sucursales.filter((s) => String(s.id) === String(effectiveSucursalId))
-    : sucursales;
+    : sucursales.filter(s => branchId === 'TODAS' || String(s.id) === branchId);
 
   if (visibles.length === 0) {
     return <EmptyState title="Sin sucursales" message="Configura sucursales en el módulo Empresa." />;
@@ -99,7 +99,6 @@ const BalanceInicialCard = () => {
     <div className="flex flex-col gap-6">
       <p className={`text-sm ${ds.muted}`}>
         El Balance Inicial es patrimonio de apertura (RN-01): <strong>no se contabiliza como ingreso por ventas</strong>.
-        {!isGlobalScope && ' Solo el rol MASTER puede editarlo.'}
       </p>
       {visibles.map((suc) => (
         <section key={suc.id} className="flex flex-col gap-3">
@@ -107,7 +106,7 @@ const BalanceInicialCard = () => {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             {TIPOS.map((def) => (
               <BalanceTipoCard
-                key={def.tipo} def={def} sucursalId={suc.id} puedeEditar={isGlobalScope}
+                key={def.tipo} def={def} sucursalId={suc.id} puedeEditar={can('tesoreria_balance', 'EDITAR') && def.tipo !== 'INVENTARIO_APERTURA'}
                 registros={balancesIniciales.filter((b) => b.tipo === def.tipo && String(b.sucursal_id) === String(suc.id))}
               />
             ))}

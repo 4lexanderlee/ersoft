@@ -7,11 +7,11 @@ import Card from '../ui/Card';
 import Btn from '../ui/Btn';
 import Input from '../ui/Input';
 import {
-  MODULO_RBAC, CATEGORIAS_GASTO, loadSucursales, desglosarIGV, formatPEN, selectCls,
+  CATEGORIAS_GASTO, loadSucursales, desglosarIGV, formatPEN, selectCls,
 } from './rendicionesUtils';
 
 /** Formulario de solicitud de rendición de gasto operativo. Nace en PENDIENTE_APROBACION. */
-const GastoRendicionModal = ({ onClose, onSaved }) => {
+const GastoRendicionModal = ({ onClose, onSaved, branchId = 'TODAS' }) => {
   const ds = useDS();
   const { user } = useAuth();
   const { can, effectiveSucursalId } = usePermission();
@@ -24,7 +24,7 @@ const GastoRendicionModal = ({ onClose, onSaved }) => {
     monto: '',
     tiene_credito_fiscal_igv: false,
     comprobante_referencia: '',
-    sucursal_id: String(effectiveSucursalId ?? sucursales[0]?.id ?? '1'),
+    sucursal_id: String(effectiveSucursalId ?? (branchId !== 'TODAS' ? branchId : sucursales[0]?.id ?? '1')),
     observaciones: '',
   });
   const [errors, setErrors] = useState({});
@@ -35,7 +35,7 @@ const GastoRendicionModal = ({ onClose, onSaved }) => {
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    if (!can(MODULO_RBAC, 'CREAR')) { setErrors({ general: 'Tu rol no puede crear rendiciones.' }); return; }
+    if (!can('tesoreria_gastos', 'CREAR')) { setErrors({ general: 'Tu rol no puede crear rendiciones.' }); return; }
     const errs = {};
     if (!form.concepto.trim()) errs.concepto = 'Describe el gasto.';
     if (!(montoNum > 0)) errs.monto = 'Ingresa un monto mayor a 0.';

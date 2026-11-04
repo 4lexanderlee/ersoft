@@ -1,0 +1,20 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext", "moduleResolution": "bundler", "jsx": "react-jsx",
+    "allowJs": true, "checkJs": false, "strict": true, "noEmit": true,
+    "skipLibCheck": true, "esModuleInterop": true,
+    "forceConsistentCasingInFileNames": true
+  },
+  "include": [
+    "src/components/treasury/**/*.ts",
+    "src/components/treasury/**/*.tsx",
+    "src/components/finanzas/**/*.ts",
+    "src/components/finanzas/**/*.tsx",
+    "src/pages/finanzas/**/*.ts",
+    "src/pages/finanzas/**/*.tsx",
+    "src/types/**/*.ts",
+    "src/types/**/*.tsx",
+    "src/utils/**/*.ts"
+  ]
+}

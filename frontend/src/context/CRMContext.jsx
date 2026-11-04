@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState } from 'react';
-import { simulatedClients } from '../data/simulatedClients';
+import { simulatedClients, CLIENT_SEGMENTS } from '../data/simulatedClients';
 import { logAuditAction } from '../data/simulatedAudit';
+import { useAuth } from './AuthContext';
 import { todayLima } from '../utils/businessData';
 
 const CRMContext = createContext();
@@ -190,9 +191,11 @@ const DEFAULT_SEGUIMIENTOS = [
 ];
 
 export const CRMProvider = ({ children }) => {
+  const { user } = useAuth();
+  const actor = user?.name || 'Usuario Actual';
   // ── 1. Oportunidades del embudo ────────────────────────────────────
   const [oportunidades, setOportunidades] = useState(() =>
-    load('ersoft_crm_oportunidades', DEFAULT_OPORTUNIDADES)
+    load('ersoft_crm_oportunidades', DEFAULT_OPORTUNIDADES).map(op => ({ ...op, segmento: op.segmento || simulatedClients.find(c => c.id === op.cliente_id || c.docNumber === op.documento)?.segmento || 'NUEVO' }))
   );
 
   // ── 2. Seguimientos / Bitácora ─────────────────────────────────────
@@ -208,14 +211,14 @@ export const CRMProvider = ({ children }) => {
   // ── CRUD de Oportunidades ──────────────────────────────────────────
   const addOportunidad = (opData) => {
     const timestamp = Date.now();
-    const count = oportunidades.length + 1;
     const items = opData.items_cotizados || [];
     const montoCalculado = items.reduce((sum, item) => sum + ((parseFloat(item.precio) || 0) * (parseFloat(item.cantidad) || 1)), 0);
 
     const nuevaOportunidad = {
       ...opData,
+      segmento: Object.hasOwn(CLIENT_SEGMENTS, opData.segmento) ? opData.segmento : 'NUEVO',
       id: timestamp,
-      oportunidad_id: opData.oportunidad_id || `OPP-${100 + count}`,
+      oportunidad_id: opData.oportunidad_id || `OPP-${timestamp}`,
       monto_estimado: opData.monto_estimado !== undefined ? parseFloat(opData.monto_estimado) : parseFloat(montoCalculado.toFixed(2)),
       items_cotizados: items,
       etapa: opData.etapa || 'PROSPECTO',
@@ -262,7 +265,7 @@ export const CRMProvider = ({ children }) => {
 
     if (prevItem && nextItem) {
       logAuditAction({
-        usuario: nextItem.vendedor_asignado || 'Usuario Actual',
+        usuario: actor,
         sucursalId: nextItem.sucursal_id || '1',
         modulo: 'CRM',
         tipoAccion: 'EDITAR',
@@ -283,11 +286,12 @@ export const CRMProvider = ({ children }) => {
 
     if (itemToDelete) {
       logAuditAction({
-        usuario: 'Usuario Actual',
+        usuario: actor,
         sucursalId: itemToDelete.sucursal_id || '1',
         modulo: 'CRM',
         tipoAccion: 'ELIMINAR',
         descripcion: `Eliminación de oportunidad comercial ${itemToDelete.oportunidad_id} (${itemToDelete.cliente_nombre})`,
+        datosNuevos: { eliminado: true, oportunidad_id: itemToDelete.oportunidad_id },
         datosPrevios: itemToDelete
       });
     }
@@ -312,7 +316,7 @@ export const CRMProvider = ({ children }) => {
         nextOp = {
           ...op,
           etapa: nuevaEtapa,
-          motivo_perdida: nuevaEtapa === 'PERDIDO' ? motivoPerdida : (nuevaEtapa === 'GANADO' ? '' : op.motivo_perdida)
+          motivo_perdida: nuevaEtapa === 'PERDIDO' ? motivoPerdida : ''
         };
         return nextOp;
       }
@@ -324,7 +328,7 @@ export const CRMProvider = ({ children }) => {
 
     if (prevOp && nextOp) {
       logAuditAction({
-        usuario: nextOp.vendedor_asignado || 'Usuario Actual',
+        usuario: actor,
         sucursalId: nextOp.sucursal_id || '1',
         modulo: 'CRM',
         tipoAccion: 'EDITAR',
@@ -465,9 +469,10 @@ export const CRMProvider = ({ children }) => {
 
     if (prevItem && nextItem) {
       logAuditAction({
-        usuario: 'Usuario Actual',
+        usuario: actor,
         modulo: 'CRM',
         tipoAccion: 'EDITAR',
+        sucursalId: nextItem.sucursal_id || oportunidades.find(o => o.oportunidad_id === nextItem.oportunidad_id)?.sucursal_id,
         descripcion: `Actualización de seguimiento #${id} de oportunidad ${nextItem.oportunidad_id}`,
         datosPrevios: prevItem,
         datosNuevos: nextItem
@@ -485,7 +490,7 @@ export const CRMProvider = ({ children }) => {
 
     if (itemToDelete) {
       logAuditAction({
-        usuario: 'Usuario Actual',
+        usuario: actor,
         modulo: 'CRM',
         tipoAccion: 'ELIMINAR',
         descripcion: `Eliminación de seguimiento #${id} de oportunidad ${itemToDelete.oportunidad_id}`,
@@ -576,6 +581,7 @@ export const CRMProvider = ({ children }) => {
         refreshCRM,
 
         // Acceso directo a clientes simulados
+        segmentosClientes: CLIENT_SEGMENTS,
         clientesSimulados: simulatedClients
       }}
     >

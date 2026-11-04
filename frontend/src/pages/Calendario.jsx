@@ -84,7 +84,7 @@ const loadSucursales = () => {
 const saveEvents = (list) => localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 
 /* ─── EventModal ─────────────────────────────────────────────────────── */
-const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, branchId }) => {
+const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, branchId, onReschedule }) => {
   const isDark = ds.isDark;
   const isEditing = !!initial?.id;
   const readOnly = !onSave;
@@ -95,11 +95,15 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
     date: initial?.date || isoDay(today()),
     startTime: initial?.startTime || '09:00',
     endTime: initial?.endTime || '10:00',
+    endDate: initial?.endDate || initial?.date || isoDay(today()),
+    responsable: initial?.responsable || user?.name || '',
+    vinculo: initial?.vinculo || '',
     allDay: initial?.allDay || false,
     desc: initial?.desc || '',
     taskDone: initial?.taskDone || false,
   });
   const [err, setErr] = useState('');
+  const [rescheduleDate, setRescheduleDate] = useState(initial?.date || isoDay(today()));
 
   const set = (k, v) => {
     if (readOnly) return;
@@ -110,7 +114,12 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
     if (!onSave) return;
     if (!form.title.trim()) { setErr('El título es obligatorio.'); return; }
     if (!form.date) { setErr('La fecha es obligatoria.'); return; }
+    if (form.type === 'evento' && (!form.endDate || form.endDate < form.date || (!form.allDay && form.endDate === form.date && form.endTime <= form.startTime))) {
+      setErr('El fin del evento debe ser posterior al inicio.'); return;
+    }
+    if (form.type === 'tarea' && (!form.responsable.trim() || !form.vinculo.trim())) { setErr('Indica responsable y vínculo operativo de la tarea.'); return; }
     onSave({
+      ...initial,
       ...form,
       id: initial?.id || `ev-${Date.now()}`,
       calType,
@@ -133,7 +142,7 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
               {readOnly ? 'Detalle de' : isEditing ? 'Editar' : 'Nuevo'} {form.type === 'tarea' ? 'Tarea' : 'Evento'}
             </h3>
             {initial?.automatic && (
-              <Badge color={form.color === 'amber' ? 'amber' : form.color === 'red' ? 'red' : 'purple'} dot>
+              <Badge color={form.color === 'amber' ? 'amber' : form.color === 'red' ? 'red' : 'indigo'} dot>
                 RN-06 Auto
               </Badge>
             )}
@@ -175,6 +184,22 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
             <input disabled={readOnly} type="date" className={inp} value={form.date} onChange={e => set('date', e.target.value)} />
           </div>
 
+          {isEditing && <div className="space-y-2">
+            <Input label="Reprogramar Fecha" type="date" disabled={!onReschedule} value={rescheduleDate} onChange={e => {
+              setRescheduleDate(e.target.value);
+              if (!initial?.automatic) setForm(p => ({ ...p, date: e.target.value, endDate: p.endDate < e.target.value ? e.target.value : p.endDate }));
+            }} />
+            {initial?.automatic && onReschedule && <button type="button" className="px-3 py-2 rounded-xl bg-yellow-500 text-black text-sm font-bold" onClick={() => {
+              if (!rescheduleDate || !form.responsable.trim()) return setErr('Selecciona una fecha válida e indica el responsable.');
+              onReschedule({ date: rescheduleDate, taskDone: form.taskDone, responsable: form.responsable });
+            }}>Guardar cambios operativos</button>}
+          </div>}
+          {form.type === 'evento' && <Input label="Fecha de fin" type="date" disabled={readOnly} min={form.date} value={form.endDate} onChange={e => set('endDate', e.target.value)} />}
+          {form.type === 'tarea' && <>
+            <Input label="Responsable" disabled={readOnly && !onReschedule} value={form.responsable} onChange={e => setForm(p => ({ ...p, responsable: e.target.value }))} />
+            <Input label="Vínculo operativo" placeholder="CRM · cliente / CxC · cuota / CxP · factura / Lote" disabled={readOnly} value={form.vinculo} onChange={e => set('vinculo', e.target.value)} />
+            {initial?.automatic && <a className="text-sm text-yellow-600 underline" href={initial.source === 'finance' ? '/rendiciones' : '/crm'}>Abrir módulo de origen</a>}
+          </>}
           {/* Time (only for events) */}
           {form.type === 'evento' && !form.allDay && (
             <div className="grid grid-cols-2 gap-3">
@@ -202,18 +227,11 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
             </label>
           )}
 
-          {/* Task done toggle */}
-          {form.type === 'tarea' && (
-            <label className={`flex items-center gap-2 select-none ${readOnly ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
-              <div
-                onClick={() => set('taskDone', !form.taskDone)}
-                className={`w-9 h-5 rounded-full relative transition-colors ${form.taskDone ? 'bg-emerald-500' : isDark ? 'bg-gray-600' : 'bg-gray-300'}`}
-              >
-                <div className={`absolute top-0.5 w-4 h-4 rounded-full bg-white shadow transition-all ${form.taskDone ? 'left-4' : 'left-0.5'}`} />
-              </div>
-              <span className={`text-xs font-semibold ${ds.muted}`}>Marcar como completada</span>
-            </label>
-          )}
+          {form.type === 'tarea' && <label className={`flex items-center gap-2 text-sm ${ds.text}`}>
+            <input type="checkbox" checked={form.taskDone} disabled={readOnly && !onReschedule} onChange={e => setForm(p => ({ ...p, taskDone: e.target.checked }))} />
+            {form.taskDone ? 'Completada' : 'Pendiente'}
+          </label>}
+          {initial?.source === 'finance' && <p className={`text-xs ${ds.muted}`}>Completar esta tarea registra la gestión. Los cobros y pagos se registran en Finanzas.</p>}
 
           {/* Color picker */}
           <div>
@@ -272,8 +290,8 @@ const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, bra
 const Calendario = () => {
   const ds = useDS();
   const { can, isGlobalScope, effectiveSucursalId } = usePermission();
-  const { cuentasCobrarPagar } = useFinanzas();
-  const { oportunidades, seguimientos } = useCRM();
+  const { cuentasCobrarPagar, updateCuenta } = useFinanzas();
+  const { oportunidades, seguimientos, updateOportunidad, updateSeguimiento } = useCRM();
   const [branchFilter, setBranchFilter] = useState('1');
   const branchId = isGlobalScope ? branchFilter : effectiveSucursalId ?? undefined;
   const { user } = useAuth();
@@ -323,13 +341,16 @@ const Calendario = () => {
 
   /* ── filter events by calType / sucursal ─────────── */
   const automaticScope = calType === 'global' && isGlobalScope ? null : branchId;
-  const financeEvents = can('rendiciones_cxc_cxp', 'VER') ? cuentasCobrarPagar.filter(c => Number(c.saldo_pendiente) > 0 && c.estado !== 'ANULADO' && inBranch(c, automaticScope)).map(c => ({
+  const financeEvents = can('rendiciones_cxc_cxp', 'VER') ? cuentasCobrarPagar.filter(c => can(c.tipo === 'POR_COBRAR' ? 'tesoreria_cxc' : 'tesoreria_cxp', 'VER') && Number(c.saldo_pendiente) > 0 && c.estado !== 'ANULADO' && inBranch(c, automaticScope)).map(c => ({
     id: `cuenta-${c.id}`, date: c.fecha_vencimiento, title: `${c.tipo === 'POR_COBRAR' ? 'CxC' : 'CxP'} · ${c.cliente_proveedor_nombre}`,
-    desc: `${c.comprobante_referencia} · Saldo S/ ${Number(c.saldo_pendiente).toFixed(2)}`, color: c.tipo === 'POR_COBRAR' ? 'amber' : 'red', type: 'evento', allDay: true, automatic: true,
+    desc: `${c.comprobante_referencia} · Saldo S/ ${Number(c.saldo_pendiente).toFixed(2)}`, color: c.tipo === 'POR_COBRAR' ? 'amber' : 'red', type: 'tarea', allDay: true, automatic: true,
+    source: 'finance', sourceId: c.id, sucursal_id: c.sucursal_id, responsable: c.responsable_calendario || user.name, vinculo: c.comprobante_referencia || `Cuenta ${c.id}`, taskDone: Boolean(c.tarea_calendario_completada),
   })) : [];
   const crmEvents = can('crm', 'VER') ? pendingContacts(oportunidades.filter(o => inBranch(o, automaticScope)), seguimientos).map(s => ({
     id: `crm-${s.oportunidad.oportunidad_id || s.oportunidad.id}`, date: s.fecha_proximo_contacto, title: `CRM · ${s.oportunidad.cliente_nombre}`, desc: s.detalle_conversacion || s.oportunidad.titulo_pedido,
-    color: 'violet', type: 'evento', allDay: true, automatic: true,
+    color: 'violet', type: 'tarea', allDay: true, automatic: true,
+    source: 'crm', sourceId: s.oportunidad.id, seguimientoId: s.id, sucursal_id: s.oportunidad.sucursal_id, responsable: s.responsable_calendario || s.oportunidad.responsable_calendario || s.oportunidad.vendedor_asignado || user.name,
+    vinculo: s.oportunidad.oportunidad_id, taskDone: Boolean(s.id ? s.tarea_calendario_completada : s.oportunidad.tarea_calendario_completada),
   })) : [];
   const visibleEvents = [...events.filter(ev => {
     if (ev.calType !== calType) return false;
@@ -338,6 +359,21 @@ const Calendario = () => {
     }
     return perm.ver;
   }), ...financeEvents, ...crmEvents];
+
+  const canReschedule = ev => perm.editar
+    && (!ev.automatic || (can('reprogramar_calendario', 'EDITAR') && inBranch(ev, automaticScope) && can(ev.source === 'finance' ? 'rendiciones_cxc_cxp' : 'crm', 'VER')));
+  const reschedule = changes => {
+    const ev = modal?.initial;
+    if (!ev || !canReschedule(ev) || !changes.date || !changes.responsable?.trim()) return;
+    if (ev.source === 'finance') {
+      updateCuenta(ev.sourceId, { fecha_vencimiento: changes.date, tarea_calendario_completada: changes.taskDone, responsable_calendario: changes.responsable });
+    } else if (ev.source === 'crm') {
+      const data = { fecha_proximo_contacto: changes.date, tarea_calendario_completada: changes.taskDone, responsable_calendario: changes.responsable };
+      if (ev.seguimientoId) updateSeguimiento(ev.seguimientoId, data);
+      updateOportunidad(ev.sourceId, data);
+    }
+    setModal(null);
+  };
 
   /* ── save / delete ────────────────────────────────── */
   const handleSave = (data) => {
@@ -355,7 +391,10 @@ const Calendario = () => {
 
   const handleDelete = (id) => {
     if (!perm.eliminar || modal?.initial?.automatic) return;
+    if (!window.confirm('¿Eliminar este registro del calendario?')) return;
+    const previous = events.find(e => e.id === id);
     const all = loadEvents().filter(e => e.id !== id);
+    logAuditAction({ usuario: user.name, sucursalId: previous?.sucursalId, modulo: 'CALENDARIO', tipoAccion: 'ELIMINAR', descripcion: previous?.title, datosPrevios: previous, datosNuevos: { eliminado: true } });
     saveEvents(all);
     setEvents(all);
     setModal(null);
@@ -382,8 +421,8 @@ const Calendario = () => {
   const totalDays  = daysInMonth(cursor.getFullYear(), cursor.getMonth());
 
   /* get events for a specific ISO date */
-  const eventsOnDay = (iso) => visibleEvents.filter(ev => ev.date === iso);
-  const nonTasksOnDay = (iso) => visibleEvents.filter(ev => ev.date === iso && ev.type === 'evento');
+  const eventsOnDay = (iso) => visibleEvents.filter(ev => ev.date <= iso && (ev.type === 'evento' ? (ev.endDate || ev.date) >= iso : ev.date === iso));
+  const nonTasksOnDay = (iso) => visibleEvents.filter(ev => ev.date <= iso && (ev.endDate || ev.date) >= iso && ev.type === 'evento');
 
   /* ── open modal ─────────────────────────────────────── */
   const openNew = (date = isoDay(today())) => {
@@ -771,7 +810,7 @@ const Calendario = () => {
                 <Badge color="red" dot>CxP</Badge>
               </>
             )}
-            {can('crm', 'VER') && <Badge color="purple" dot>CRM</Badge>}
+            {can('crm', 'VER') && <Badge color="indigo" dot>CRM</Badge>}
           </div>
           <div className={`hidden sm:flex items-center gap-3 text-xs ${subTx} border-r pr-3 ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
             <span className="flex items-center gap-1"><FaCalendarAlt size={9} className="text-indigo-400" /> {totalEvs} eventos</span>
@@ -802,6 +841,7 @@ const Calendario = () => {
           user={user}
           branchId={branchId}
           ds={ds}
+          onReschedule={canReschedule(modal.initial || {}) ? reschedule : null}
           onSave={!modal.initial?.automatic && (modal.initial?.id ? perm.editar : perm.crear) ? handleSave : null}
           onDelete={!modal.initial?.automatic && perm.eliminar ? () => handleDelete(modal.initial?.id) : null}
           onClose={() => setModal(null)}

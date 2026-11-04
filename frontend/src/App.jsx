@@ -22,7 +22,8 @@ import Promociones from './pages/Promociones';
 import Caja from './pages/Caja';
 import Calendario from './pages/Calendario';
 import Kardex from './pages/Kardex';
-import Rendiciones from './pages/Rendiciones';
+import TreasuryView from './components/treasury/TreasuryView';
+import ProfitLossReportPage from './pages/finanzas/ProfitLossReportPage';
 
 // Empresa subpages
 import DatosUbi from './pages/empresa/DatosUbi';
@@ -94,7 +95,9 @@ function AppRoutes() {
         <Route path="promociones" element={<ModuleProtectedRoute moduleKey="promociones"><Promociones /></ModuleProtectedRoute>} />
         <Route path="caja" element={<ModuleProtectedRoute moduleKey="caja"><Caja /></ModuleProtectedRoute>} />
         
-        <Route path="rendiciones" element={<ModuleProtectedRoute moduleKey="rendiciones_cxc_cxp"><Rendiciones /></ModuleProtectedRoute>} />
+        <Route path="tesoreria" element={<ModuleProtectedRoute moduleKey="rendiciones_cxc_cxp"><TreasuryView /></ModuleProtectedRoute>} />
+        <Route path="rendiciones" element={<Navigate to="/tesoreria" replace />} />
+        <Route path="finanzas/estado-resultados" element={<ModuleProtectedRoute moduleKey="estado_resultados"><ProfitLossReportPage /></ModuleProtectedRoute>} />
         <Route path="crm" element={<ModuleProtectedRoute moduleKey="crm"><CRM /></ModuleProtectedRoute>} />
         <Route path="calendario" element={<ModuleProtectedRoute moduleKey="calendario"><Calendario /></ModuleProtectedRoute>} />
         <Route path="usuarios" element={<Placeholder title="Usuarios" />} />

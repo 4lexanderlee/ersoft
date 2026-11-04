@@ -1,8 +1,11 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useFinanzas } from '../context/FinanzasContext';
+import { usePermission } from '../hooks/usePermission';
+import { isOpenCashSession, findCashSession } from '../utils/cashSession';
+import { getBranches, readStored } from '../utils/businessData';
 import { useDS } from '../hooks/useDS';
 import {
   FaLockOpen, FaLock, FaHistory, FaCalendarAlt, FaCashRegister,
@@ -83,22 +86,39 @@ const Caja = () => {
   const { theme } = useTheme();
   const ds = useDS();
   const { user } = useAuth();
+  const { can } = usePermission();
   const {
     terminalInfo,
-    realTerminalInfo,
     simularOtroDispositivo,
     setSimularOtroDispositivo,
-    desbloquearTerminalMaster
+    desbloquearTerminalMaster,
+    syncCajaSessions,
+    ownsPOSLock,
+    assertCanOperatePOS,
+    cajaSesiones,
+    cuentasCobrarPagar,
+    ventas,
+    refreshFinanzas: loadCajaData,
   } = useFinanzas();
   const navigate = useNavigate();
   const isDark = theme === 'dark';
 
   /* state */
-  const [activeSession, setActiveSession] = useState(null);
-  const [efectivoVentas, setEfectivoVentas] = useState(0);
-  const [historialSesiones, setHistorialSesiones] = useState([]);
-  const [sucursales, setSucursales] = useState([]);
-  const [usuarios, setUsuarios] = useState([]);
+  const [sucursales] = useState(getBranches);
+  const [usuarios] = useState(() => [{ id: 1, name: user?.name || 'Master', role: 'Master' }, ...readStored('ersoft_usuarios', []).filter(u => String(u.id) !== '1')]);
+  const historialSesiones = cajaSesiones;
+  const activeSession = cajaSesiones.find(s => isOpenCashSession(s) && String(s.usuarioId) === String(user?.id)
+    && (user?.rol === 'MASTER' || String(s.sucursalId) === String(user?.sucursal_id))) || null;
+  const efectivoVentas = activeSession ? ventas.filter(c =>
+    c.metodoPago === 'cash' && c.condicion_pago !== 'CREDITO'
+    && c.vendedor === (user?.name || user?.username)
+    && new Date(c.fecha) >= new Date(activeSession.fechaApertura)
+    && String(c.sucursalId || c.sucursal_id || '1') === String(activeSession.sucursalId)
+    && !['ANULADO', 'ANULADA'].includes(String(c.estado).toUpperCase())
+  ).reduce((sum, c) => sum + safeNum(c.total), 0) + cuentasCobrarPagar.reduce((sum, account) =>
+    sum + (account.abonos || []).filter(a => a.caja_id === activeSession.id && a.metodo_pago === 'Efectivo')
+      .reduce((n, a) => n + (account.tipo === 'POR_COBRAR' ? 1 : -1) * safeNum(a.monto), 0), 0)
+    + (activeSession.movimientosCaja || []).filter(m => m.tipo === 'INGRESO_ADELANTO_CREDITO' && m.metodoPago === 'Efectivo').reduce((sum, m) => sum + safeNum(m.monto), 0) : 0;
 
   const [montoApertura, setMontoApertura] = useState('');
   const [montoCierre, setMontoCierre] = useState('');
@@ -121,94 +141,13 @@ const Caja = () => {
   const isSessionBlocked = Boolean(
     activeSession &&
     activeSession.terminal_id &&
-    activeSession.terminal_id !== terminalInfo.terminal_id
+    (activeSession.terminal_id !== terminalInfo.terminal_id || !ownsPOSLock)
   );
-
-  /* ── load reference data ─────────────────────────────────────── */
-  useEffect(() => {
-    const DEFAULT_SUCURSALES = [
-      { id: '1', nombre: 'Sede Principal' },
-      { id: '2', nombre: 'Sede Norte' },
-      { id: '3', nombre: 'Sede Sur' },
-    ];
-    try {
-      const s = localStorage.getItem('ersoft_sucursales');
-      setSucursales(s ? JSON.parse(s) : DEFAULT_SUCURSALES);
-    } catch { setSucursales(DEFAULT_SUCURSALES); }
-
-    try {
-      const usrRaw = localStorage.getItem('ersoft_usuarios') || '[]';
-      const usrList = JSON.parse(usrRaw);
-      // Ensure master user always appears in filter list
-      const masterObj = {
-        id: 1,
-        name: user?.name || 'Alexander Lee Melgarejo',
-        role: 'Master',
-      };
-      // Avoid duplicating if master is already in list
-      const withoutMaster = usrList.filter(u => String(u.id) !== '1');
-      setUsuarios([masterObj, ...withoutMaster]);
-    } catch { setUsuarios([]); }
-  }, []);
-
-  /* ── load / refresh caja data ──────────────────────────────────── */
-  const loadCajaData = useCallback(() => {
-    if (!user) return;
-    try {
-      const raw = localStorage.getItem('ersoft_caja_sesiones') || '[]';
-      const sessions = JSON.parse(raw);
-
-      // Sanitize sessions — ensure all required fields exist
-      const sanitized = sessions.map(s => ({
-        id: s.id || `CAJA-${Math.random()}`,
-        estado: s.estado || 'Cerrado',
-        fechaApertura: s.fechaApertura || null,
-        fechaCierre: s.fechaCierre || null,
-        usuarioId: s.usuarioId != null ? String(s.usuarioId) : '?',
-        usuarioNombre: s.usuarioNombre || 'Usuario',
-        sucursalId: s.sucursalId != null ? String(s.sucursalId) : '1',
-        terminal_id: s.terminal_id || null,
-        ip_detectada: s.ip_detectada || null,
-        navegador_so: s.navegador_so || null,
-        desbloqueado_por_master: Boolean(s.desbloqueado_por_master),
-        montoApertura: safeNum(s.montoApertura),
-        efectivoVentas: safeNum(s.efectivoVentas),
-        montoCierre: s.montoCierre != null ? safeNum(s.montoCierre) : null,
-        diferencia: s.diferencia != null ? safeNum(s.diferencia) : null,
-      }));
-
-      setHistorialSesiones(sanitized);
-
-      /* Find OWN active session – Master has no sucursalId restriction */
-      const activeForMe = sanitized.find(s =>
-        String(s.usuarioId) === String(user.id) && s.estado === 'Abierto'
-      );
-      setActiveSession(activeForMe || null);
-
-      /* Calculate cash sales since opening */
-      if (activeForMe) {
-        const comprobantes = JSON.parse(localStorage.getItem('ersoft_comprobantes') || '[]');
-        const cashSales = comprobantes.filter(c => {
-          const matchMethod = c.metodoPago === 'cash';
-          const matchSeller = c.vendedor === (user.name || user.username || 'Vendedor');
-          const matchDate = new Date(c.fecha) >= new Date(activeForMe.fechaApertura);
-          const matchState = c.estado !== 'Anulado';
-          return matchMethod && matchSeller && matchDate && matchState;
-        });
-        setEfectivoVentas(cashSales.reduce((sum, c) => sum + safeNum(c.total), 0));
-      } else {
-        setEfectivoVentas(0);
-      }
-    } catch (e) {
-      console.error('[Caja] loadCajaData error:', e);
-    }
-  }, [user]);
-
-  useEffect(() => { loadCajaData(); }, [loadCajaData]);
 
   /* ── actions ─────────────────────────────────────────────────── */
   const handleAbrirCaja = (e) => {
     e.preventDefault();
+    if (!can('ventas_caja', 'CREAR') || !ownsPOSLock) { setAperturaError('Otra pestaña tiene la sesión operativa o el navegador no permite reservarla. Cierra la otra pestaña y usa HTTPS o localhost.'); return; }
     const val = parseFloat(montoApertura);
     if (isNaN(val) || val < 0) {
       setAperturaError('Ingrese un monto inicial válido (≥ 0).');
@@ -216,6 +155,7 @@ const Caja = () => {
     }
     try {
       const sessions = JSON.parse(localStorage.getItem('ersoft_caja_sesiones') || '[]');
+      if (findCashSession(sessions, user.sucursal_id || '1') || sessions.some(s => isOpenCashSession(s) && String(s.usuarioId) === String(user.id))) { setAperturaError('Ya existe una caja abierta para esta sucursal o usuario. Cierra el turno anterior.'); return; }
       const newSession = {
         id: `CAJA-${Date.now()}`,
         estado: 'Abierto',
@@ -239,14 +179,16 @@ const Caja = () => {
         sucursalId: user.sucursalId || '1',
         modulo: 'CAJA',
         tipoAccion: 'CREAR',
-        descripcion: `Apertura de turno de Caja (${newSession.id}) con monto inicial S/ ${val.toFixed(2)} vinculada a terminal ${terminalInfo.terminal_id} (${terminalInfo.ip_detectada})`,
+        descripcion: `Apertura de turno de Caja (${newSession.id}) con monto inicial S/ ${val.toFixed(2)} vinculada a terminal ${terminalInfo.terminal_id} (${terminalInfo.ip_detectada || 'No disponible (servidor no configurado)'})`,
         datosNuevos: newSession,
         ip: terminalInfo.ip_detectada
       });
 
       setMontoApertura('');
       setAperturaError('');
+      syncCajaSessions();
       loadCajaData();
+      navigate('/ventas');
     } catch (err) {
       console.error(err);
       setAperturaError('Error al guardar la sesión.');
@@ -263,6 +205,7 @@ const Caja = () => {
     if (isNaN(val) || val < 0) { setCierreError('Ingrese un monto de cierre válido.'); return; }
     if (!activeSession) return;
     try {
+      assertCanOperatePOS(activeSession.sucursalId);
       const sessions = JSON.parse(localStorage.getItem('ersoft_caja_sesiones') || '[]');
       const esperado = safeNum(activeSession.montoApertura) + efectivoVentas;
       const updated = sessions.map(s =>
@@ -297,7 +240,7 @@ const Caja = () => {
       loadCajaData();
     } catch (err) {
       console.error(err);
-      setCierreError('Error al cerrar la caja.');
+      setCierreError(err.message || 'Error al cerrar la caja.');
     }
   };
 
@@ -392,13 +335,13 @@ const Caja = () => {
                   Seguridad de Terminal y Detección de Dispositivo / IP (RN-07)
                 </h3>
                 <p className={`text-xs ${subTx}`}>
-                  Huella digital de hardware, IP detectada y control de acceso exclusivo a caja
+                  Identificador del navegador, IP observada por el servidor y sesión operativa
                 </p>
               </div>
             </div>
 
             {/* Simulation Toggle */}
-            <div className="flex items-center gap-2">
+            {import.meta.env.DEV && <div className="flex items-center gap-2">
               <button
                 type="button"
                 onClick={() => {
@@ -416,7 +359,7 @@ const Caja = () => {
                 <span className={`w-2 h-2 rounded-full ${simularOtroDispositivo ? 'bg-black animate-ping' : 'bg-gray-400'}`} />
                 Simular acceso desde otro dispositivo/IP
               </button>
-            </div>
+            </div>}
           </div>
 
           {/* Info Grid */}
@@ -436,10 +379,10 @@ const Caja = () => {
                 <FaNetworkWired size={11} /> IP Detectada
               </span>
               <span className={`font-mono text-sm font-black ${simularOtroDispositivo ? 'text-amber-400' : 'text-emerald-400'}`}>
-                {terminalInfo.ip_detectada}
+                {terminalInfo.ip_detectada || 'No disponible'}
               </span>
               <span className="text-[10px] text-gray-400">
-                {simularOtroDispositivo ? 'IP Remota Simulada' : 'Red Local / Ethernet'}
+                {simularOtroDispositivo ? 'IP Remota Simulada' : 'Dirección observada por el servidor'}
               </span>
             </div>
 
@@ -451,7 +394,7 @@ const Caja = () => {
                 {activeSession ? (activeSession.terminal_id || 'Sin vincular') : 'Ninguna caja abierta'}
               </span>
               <span className="text-[10px] text-gray-400">
-                {activeSession ? (activeSession.ip_detectada || 'IP local') : 'Esperando apertura'}
+                {activeSession ? (activeSession.ip_detectada || 'IP no disponible') : 'Esperando apertura'}
               </span>
             </div>
 
