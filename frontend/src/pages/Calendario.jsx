@@ -11,10 +11,16 @@ import { useDS } from '../hooks/useDS';
 import { useAuth } from '../context/AuthContext';
 import {
   FaPlus, FaTimes, FaChevronLeft, FaChevronRight, FaCalendarAlt,
-  FaGlobe, FaStore, FaCheck, FaTrash, FaPencilAlt, FaSync,
-  FaCircle, FaClock, FaTag, FaAlignLeft, FaBullseye,
+  FaGlobe, FaStore, FaCheck, FaTrash, FaSync, FaClock,
 } from 'react-icons/fa';
 import PageHeader from '../components/ui/PageHeader';
+import Badge from '../components/ui/Badge';
+import { usePermission } from '../hooks/usePermission';
+import { useFinanzas } from '../context/FinanzasContext';
+import { useCRM } from '../context/CRMContext';
+import { inBranch, pendingContacts } from '../utils/businessData';
+import { logAuditAction } from '../data/simulatedAudit';
+import Input from '../components/ui/Input';
 
 /* ─── constants ────────────────────────────────────────────────────── */
 const DAYS_ES  = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
@@ -22,6 +28,7 @@ const MONTHS_ES = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Ago
 const HOURS = Array.from({ length: 24 }, (_, i) => i);
 
 const EVENT_COLORS = [
+  { id: 'red', label: 'Rojo', bg: 'bg-red-500', border: 'border-red-400', text: 'text-white', hex: '#ef4444' },
   { id: 'indigo',  label: 'Índigo',   bg: 'bg-indigo-500',   border: 'border-indigo-400',   text: 'text-white',   hex: '#6366f1' },
   { id: 'emerald', label: 'Verde',    bg: 'bg-emerald-500',  border: 'border-emerald-400',  text: 'text-white',   hex: '#10b981' },
   { id: 'amber',   label: 'Ámbar',    bg: 'bg-amber-500',    border: 'border-amber-400',    text: 'text-black',   hex: '#f59e0b' },
@@ -38,7 +45,7 @@ const colorOf = (id) => EVENT_COLORS.find(c => c.id === id) || EVENT_COLORS[0];
 const today = () => {
   const d = new Date(); d.setHours(0,0,0,0); return d;
 };
-const isoDay = (d) => d.toISOString().slice(0,10);
+const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const addDays = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
 const startOfWeek = (d) => { const x = new Date(d); x.setDate(x.getDate() - x.getDay()); x.setHours(0,0,0,0); return x; };
 const startOfMonth = (d) => new Date(d.getFullYear(), d.getMonth(), 1);
@@ -55,34 +62,32 @@ const fmtTime = (minutes) => {
   const hh = h % 12 || 12;
   return `${hh}:${m.toString().padStart(2,'0')}${ampm}`;
 };
-const dayLabel = (d) => `${DAYS_ES[d.getDay()]} ${d.getDate()}`;
-
-/* ─── permission check ──────────────────────────────────────────────── */
-const getCalPerm = (user, calType) => {
-  // Master always has full access
-  if (!user || user.role === 'Master') return { ver: true, crear: true, editar: true, eliminar: true };
-  try {
-    const saved = localStorage.getItem('ersoft_roles_permisos');
-    const roles = saved ? JSON.parse(saved) : {};
-    const rp = roles[user.role];
-    if (!rp) return { ver: false, crear: false, editar: false, eliminar: false };
-    const key = calType === 'global' ? 'calendario_global' : 'calendario_sucursal';
-    return rp[key] || { ver: true, crear: false, editar: false, eliminar: false };
-  } catch { return { ver: true, crear: false, editar: false, eliminar: false }; }
-};
-
 /* ─── storage ───────────────────────────────────────────────────────── */
 const STORAGE_KEY = 'ersoft_calendario_eventos';
+const DEFAULT_SUCURSALES = [
+  { id: '1', nombre: 'Sede Principal' },
+  { id: '2', nombre: 'Sede Norte' },
+  { id: '3', nombre: 'Sede Sur' },
+];
 const loadEvents = () => {
   try { return JSON.parse(localStorage.getItem(STORAGE_KEY) || '[]'); }
   catch { return []; }
 };
+const loadSucursales = () => {
+  try {
+    const s = localStorage.getItem('ersoft_sucursales');
+    return s ? JSON.parse(s) : DEFAULT_SUCURSALES;
+  } catch {
+    return DEFAULT_SUCURSALES;
+  }
+};
 const saveEvents = (list) => localStorage.setItem(STORAGE_KEY, JSON.stringify(list));
 
 /* ─── EventModal ─────────────────────────────────────────────────────── */
-const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, onClose }) => {
+const EventModal = ({ initial, calType, user, ds, onSave, onDelete, onClose, branchId }) => {
   const isDark = ds.isDark;
   const isEditing = !!initial?.id;
+  const readOnly = !onSave;
   const [form, setForm] = useState({
     title: initial?.title || '',
     type: initial?.type || 'evento',           // 'evento' | 'tarea'
@@ -96,22 +101,26 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
   });
   const [err, setErr] = useState('');
 
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+  const set = (k, v) => {
+    if (readOnly) return;
+    setForm(p => ({ ...p, [k]: v }));
+  };
 
   const handleSave = () => {
+    if (!onSave) return;
     if (!form.title.trim()) { setErr('El título es obligatorio.'); return; }
     if (!form.date) { setErr('La fecha es obligatoria.'); return; }
     onSave({
       ...form,
       id: initial?.id || `ev-${Date.now()}`,
       calType,
-      sucursalId: calType === 'sucursal' ? (user?.sucursalId || '1') : null,
+      sucursalId: calType === 'sucursal' ? branchId : null,
       createdBy: user?.id,
       createdByName: user?.name || 'Usuario',
     });
   };
 
-  const inp = `w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 ${ds.inputCls}`;
+  const inp = `w-full px-3 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 disabled:opacity-70 ${ds.inputCls}`;
   const label = `text-[10px] font-bold uppercase tracking-wider block mb-1 ${ds.muted}`;
 
   return (
@@ -119,9 +128,16 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
       <div className={`w-full max-w-md rounded-2xl shadow-2xl border flex flex-col max-h-[90vh] overflow-y-auto ${ds.cardBg}`}>
         {/* Header */}
         <div className={`flex items-center justify-between px-5 py-4 border-b ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
-          <h3 className={`font-black text-base ${ds.text}`}>
-            {isEditing ? 'Editar' : 'Nuevo'} {form.type === 'tarea' ? 'Tarea' : 'Evento'}
-          </h3>
+          <div className="flex items-center gap-2">
+            <h3 className={`font-black text-base ${ds.text}`}>
+              {readOnly ? 'Detalle de' : isEditing ? 'Editar' : 'Nuevo'} {form.type === 'tarea' ? 'Tarea' : 'Evento'}
+            </h3>
+            {initial?.automatic && (
+              <Badge color={form.color === 'amber' ? 'amber' : form.color === 'red' ? 'red' : 'purple'} dot>
+                RN-06 Auto
+              </Badge>
+            )}
+          </div>
           <button onClick={onClose} className={`${ds.muted} hover:${ds.text}`}><FaTimes size={16} /></button>
         </div>
 
@@ -133,8 +149,10 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
             {['evento','tarea'].map(t => (
               <button
                 key={t}
+                type="button"
+                disabled={readOnly}
                 onClick={() => set('type', t)}
-                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors ${
+                className={`flex-1 py-2 text-xs font-bold uppercase tracking-wider transition-colors disabled:cursor-not-allowed ${
                   form.type === t
                     ? 'bg-yellow-500 text-black'
                     : isDark ? 'bg-gray-700 text-gray-400 hover:bg-gray-600' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
@@ -148,13 +166,13 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
           {/* Title */}
           <div>
             <label className={label}>Título *</label>
-            <input className={inp} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Ej. Reunión de equipo" />
+            <input disabled={readOnly} className={inp} value={form.title} onChange={e => set('title', e.target.value)} placeholder="Ej. Reunión de equipo" />
           </div>
 
           {/* Date */}
           <div>
             <label className={label}>Fecha *</label>
-            <input type="date" className={inp} value={form.date} onChange={e => set('date', e.target.value)} />
+            <input disabled={readOnly} type="date" className={inp} value={form.date} onChange={e => set('date', e.target.value)} />
           </div>
 
           {/* Time (only for events) */}
@@ -162,18 +180,18 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className={label}>Inicio</label>
-                <input type="time" className={inp} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
+                <input disabled={readOnly} type="time" className={inp} value={form.startTime} onChange={e => set('startTime', e.target.value)} />
               </div>
               <div>
                 <label className={label}>Fin</label>
-                <input type="time" className={inp} value={form.endTime} onChange={e => set('endTime', e.target.value)} />
+                <input disabled={readOnly} type="time" className={inp} value={form.endTime} onChange={e => set('endTime', e.target.value)} />
               </div>
             </div>
           )}
 
           {/* All day toggle (events only) */}
           {form.type === 'evento' && (
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            <label className={`flex items-center gap-2 select-none ${readOnly ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
               <div
                 onClick={() => set('allDay', !form.allDay)}
                 className={`w-9 h-5 rounded-full relative transition-colors ${form.allDay ? 'bg-yellow-500' : isDark ? 'bg-gray-600' : 'bg-gray-300'}`}
@@ -186,7 +204,7 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
 
           {/* Task done toggle */}
           {form.type === 'tarea' && (
-            <label className="flex items-center gap-2 cursor-pointer select-none">
+            <label className={`flex items-center gap-2 select-none ${readOnly ? 'opacity-70 cursor-not-allowed' : 'cursor-pointer'}`}>
               <div
                 onClick={() => set('taskDone', !form.taskDone)}
                 className={`w-9 h-5 rounded-full relative transition-colors ${form.taskDone ? 'bg-emerald-500' : isDark ? 'bg-gray-600' : 'bg-gray-300'}`}
@@ -204,8 +222,10 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
               {EVENT_COLORS.map(c => (
                 <button
                   key={c.id}
+                  type="button"
+                  disabled={readOnly}
                   onClick={() => set('color', c.id)}
-                  className={`w-7 h-7 rounded-full border-2 transition-transform hover:scale-110 ${c.bg} ${form.color === c.id ? 'border-white scale-110' : 'border-transparent'}`}
+                  className={`w-7 h-7 rounded-full border-2 transition-transform ${readOnly ? 'cursor-not-allowed opacity-80' : 'hover:scale-110'} ${c.bg} ${form.color === c.id ? 'border-white scale-110' : 'border-transparent'}`}
                   title={c.label}
                 />
               ))}
@@ -217,6 +237,7 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
             <label className={label}>Descripción</label>
             <textarea
               rows={2}
+              disabled={readOnly}
               className={`${inp} resize-none`}
               value={form.desc}
               onChange={e => set('desc', e.target.value)}
@@ -234,11 +255,11 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
           )}
           <div className="flex-1" />
           <button onClick={onClose} className={`px-4 py-2 rounded-xl border text-sm font-semibold transition-colors ${isDark ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
-            Cancelar
+            {readOnly ? 'Cerrar' : 'Cancelar'}
           </button>
-          <button onClick={handleSave} className="px-5 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-black text-sm transition-colors flex items-center gap-1.5">
+          {onSave && <button onClick={handleSave} className="px-5 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-black text-sm transition-colors flex items-center gap-1.5">
             <FaCheck size={11} /> Guardar
-          </button>
+          </button>}
         </div>
       </div>
     </div>
@@ -250,16 +271,21 @@ const EventModal = ({ initial, calType, sucursales, user, ds, onSave, onDelete, 
 ═══════════════════════════════════════════════════════ */
 const Calendario = () => {
   const ds = useDS();
+  const { can, isGlobalScope, effectiveSucursalId } = usePermission();
+  const { cuentasCobrarPagar } = useFinanzas();
+  const { oportunidades, seguimientos } = useCRM();
+  const [branchFilter, setBranchFilter] = useState('1');
+  const branchId = isGlobalScope ? branchFilter : effectiveSucursalId ?? undefined;
   const { user } = useAuth();
   const navigate = useNavigate();
   const isDark = ds.isDark;
 
   /* calendar state */
   const [view, setView] = useState('semana');       // 'semana' | 'mes' | 'agenda'
-  const [calType, setCalType] = useState('global'); // 'global' | 'sucursal'
+  const [calType, setCalType] = useState(isGlobalScope ? 'global' : 'sucursal');
   const [cursor, setCursor] = useState(today());    // anchor date for navigation
-  const [events, setEvents] = useState([]);
-  const [sucursales, setSucursales] = useState([]);
+  const [events, setEvents] = useState(() => loadEvents());
+  const [sucursales, setSucursales] = useState(() => loadSucursales());
 
   /* modal */
   const [modal, setModal] = useState(null); // null | { mode:'new'|'edit', initial?, date? }
@@ -270,22 +296,14 @@ const Calendario = () => {
   });
   const scrollRef = useRef(null);
 
-  const perm = getCalPerm(user, calType);
+  const permissionModule = calType === 'global' ? 'calendario_global' : 'calendario_sucursal';
+  const perm = { ver: can(permissionModule, 'VER'), crear: can(permissionModule, 'CREAR'), editar: can(permissionModule, 'EDITAR'), eliminar: can(permissionModule, 'ELIMINAR') };
 
   /* ── load ─────────────────────────────────────────── */
   const loadData = useCallback(() => {
     setEvents(loadEvents());
-    try {
-      const s = localStorage.getItem('ersoft_sucursales');
-      setSucursales(s ? JSON.parse(s) : [
-        { id: '1', nombre: 'Sede Principal' },
-        { id: '2', nombre: 'Sede Norte' },
-        { id: '3', nombre: 'Sede Sur' },
-      ]);
-    } catch {}
+    setSucursales(loadSucursales());
   }, []);
-
-  useEffect(() => { loadData(); }, [loadData]);
 
   /* live clock */
   useEffect(() => {
@@ -304,27 +322,39 @@ const Calendario = () => {
   }, [view]);
 
   /* ── filter events by calType / sucursal ─────────── */
-  const visibleEvents = events.filter(ev => {
+  const automaticScope = calType === 'global' && isGlobalScope ? null : branchId;
+  const financeEvents = can('rendiciones_cxc_cxp', 'VER') ? cuentasCobrarPagar.filter(c => Number(c.saldo_pendiente) > 0 && c.estado !== 'ANULADO' && inBranch(c, automaticScope)).map(c => ({
+    id: `cuenta-${c.id}`, date: c.fecha_vencimiento, title: `${c.tipo === 'POR_COBRAR' ? 'CxC' : 'CxP'} · ${c.cliente_proveedor_nombre}`,
+    desc: `${c.comprobante_referencia} · Saldo S/ ${Number(c.saldo_pendiente).toFixed(2)}`, color: c.tipo === 'POR_COBRAR' ? 'amber' : 'red', type: 'evento', allDay: true, automatic: true,
+  })) : [];
+  const crmEvents = can('crm', 'VER') ? pendingContacts(oportunidades.filter(o => inBranch(o, automaticScope)), seguimientos).map(s => ({
+    id: `crm-${s.oportunidad.oportunidad_id || s.oportunidad.id}`, date: s.fecha_proximo_contacto, title: `CRM · ${s.oportunidad.cliente_nombre}`, desc: s.detalle_conversacion || s.oportunidad.titulo_pedido,
+    color: 'violet', type: 'evento', allDay: true, automatic: true,
+  })) : [];
+  const visibleEvents = [...events.filter(ev => {
     if (ev.calType !== calType) return false;
     if (calType === 'sucursal') {
-      const userSuc = String(user?.sucursalId || '1');
-      if (user?.role !== 'Master' && String(ev.sucursalId) !== userSuc) return false;
+      if (String(ev.sucursalId) !== String(branchId)) return false;
     }
-    return true;
-  });
+    return perm.ver;
+  }), ...financeEvents, ...crmEvents];
 
   /* ── save / delete ────────────────────────────────── */
   const handleSave = (data) => {
+    if (modal?.initial?.automatic || !(modal?.initial?.id ? perm.editar : perm.crear)) return;
     const all = loadEvents();
     const idx = all.findIndex(e => e.id === data.id);
+    const previous = idx >= 0 ? all[idx] : null;
     if (idx >= 0) all[idx] = data;
     else all.push(data);
     saveEvents(all);
     setEvents(all);
+    logAuditAction({ usuario: user.name, sucursalId: data.sucursalId, modulo: 'CALENDARIO', tipoAccion: previous ? 'EDITAR' : 'CREAR', descripcion: data.title, datosPrevios: previous, datosNuevos: data });
     setModal(null);
   };
 
   const handleDelete = (id) => {
+    if (!perm.eliminar || modal?.initial?.automatic) return;
     const all = loadEvents().filter(e => e.id !== id);
     saveEvents(all);
     setEvents(all);
@@ -339,7 +369,7 @@ const Calendario = () => {
   };
   const goNext = () => {
     if (view === 'semana') setCursor(p => addDays(p, 7));
-    else setCursor(p => addDays(new Date(cursor.getFullYear(), cursor.getMonth() + 1, 1), 0));
+    else setCursor(p => new Date(p.getFullYear(), p.getMonth() + 1, 1));
   };
 
   /* ── week range ────────────────────────────────────── */
@@ -353,7 +383,6 @@ const Calendario = () => {
 
   /* get events for a specific ISO date */
   const eventsOnDay = (iso) => visibleEvents.filter(ev => ev.date === iso);
-  const tasksOnDay  = (iso) => visibleEvents.filter(ev => ev.date === iso && ev.type === 'tarea');
   const nonTasksOnDay = (iso) => visibleEvents.filter(ev => ev.date === iso && ev.type === 'evento');
 
   /* ── open modal ─────────────────────────────────────── */
@@ -362,7 +391,7 @@ const Calendario = () => {
     setModal({ mode: 'new', initial: { date } });
   };
   const openEdit = (ev) => {
-    if (!perm.editar) {
+    if (ev.automatic || !perm.editar) {
       setModal({ mode: 'view', initial: ev });
       return;
     }
@@ -370,7 +399,6 @@ const Calendario = () => {
   };
 
   /* ─── styles ─────────────────────────────────────── */
-  const text   = isDark ? 'text-white' : 'text-gray-900';
   const subTx  = isDark ? 'text-gray-400' : 'text-gray-500';
   const gridBd = isDark ? 'border-gray-700' : 'border-gray-200';
   const hdr    = isDark ? 'bg-gray-800/50' : 'bg-gray-50';
@@ -396,7 +424,7 @@ const Calendario = () => {
   /* ══════════════════════════════════════════════════════
      WEEK VIEW
   ══════════════════════════════════════════════════════ */
-  const WeekView = () => {
+  const renderWeekView = () => {
     const todayStr = isoDay(today());
     const CELL_H = 60; // px per hour
     const TOTAL_H = 24 * CELL_H;
@@ -469,7 +497,7 @@ const Calendario = () => {
             {/* Events overlay */}
             <div className="absolute inset-0 pointer-events-none" style={{ paddingLeft: 56 }}>
               <div className="relative h-full grid" style={{ gridTemplateColumns: 'repeat(7, 1fr)' }}>
-                {weekDays.map((d, di) => {
+                {weekDays.map((d) => {
                   const iso = isoDay(d);
                   const dayEvts = nonTasksOnDay(iso).filter(e => !e.allDay);
                   return (
@@ -525,7 +553,7 @@ const Calendario = () => {
   /* ══════════════════════════════════════════════════════
      MONTH VIEW
   ══════════════════════════════════════════════════════ */
-  const MonthView = () => {
+  const renderMonthView = () => {
     const todayStr = isoDay(today());
     const cells = [];
     // empty leading cells
@@ -590,7 +618,7 @@ const Calendario = () => {
   /* ══════════════════════════════════════════════════════
      AGENDA VIEW
   ══════════════════════════════════════════════════════ */
-  const AgendaView = () => {
+  const renderAgendaView = () => {
     const todayStr = isoDay(today());
     // Show 30 days starting from cursor
     const days = Array.from({ length: 30 }, (_, i) => addDays(cursor, i));
@@ -709,12 +737,9 @@ const Calendario = () => {
       <div className={`flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b shrink-0 ${isDark ? 'bg-gray-800/30 border-gray-700' : 'bg-white/50 border-gray-200'}`}>
         {/* Left: calendar type tabs */}
         <div className="flex items-center gap-2">
-          <button onClick={() => setCalType('global')} className={calTabBtn(calType === 'global')}>
-            <FaGlobe size={11} /> Global
-          </button>
-          <button onClick={() => setCalType('sucursal')} className={calTabBtn(calType === 'sucursal')}>
-            <FaStore size={11} /> {user?.sucursalName || getSucursalName(user?.sucursalId || '1')}
-          </button>
+          {can('calendario_global', 'VER') && <button onClick={() => { setCalType('global'); setModal(null); }} className={calTabBtn(calType === 'global')}><FaGlobe size={11} /> Calendario Global</button>}
+          {can('calendario_sucursal', 'VER') && <button onClick={() => { setCalType('sucursal'); setModal(null); }} className={calTabBtn(calType === 'sucursal')}><FaStore size={11} /> Calendario Sucursal</button>}
+          {calType === 'sucursal' && <Input as="select" size="sm" aria-label="Sucursal del calendario" value={branchId || ''} disabled={!isGlobalScope} onChange={e => { setBranchFilter(e.target.value); setModal(null); }}>{sucursales.filter(s => isGlobalScope || String(s.id) === String(branchId)).map(s => <option key={s.id} value={s.id}>{getSucursalName(s.id)}</option>)}</Input>}
         </div>
 
         {/* Center: navigation */}
@@ -738,7 +763,16 @@ const Calendario = () => {
 
         {/* Right: view tabs + stats */}
         <div className="flex items-center gap-3">
-          {/* Mini stats */}
+          {/* Leyenda RN-06 + Mini stats */}
+          <div className={`hidden lg:flex items-center gap-1.5 border-r pr-3 ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
+            {can('rendiciones_cxc_cxp', 'VER') && (
+              <>
+                <Badge color="amber" dot>CxC</Badge>
+                <Badge color="red" dot>CxP</Badge>
+              </>
+            )}
+            {can('crm', 'VER') && <Badge color="purple" dot>CRM</Badge>}
+          </div>
           <div className={`hidden sm:flex items-center gap-3 text-xs ${subTx} border-r pr-3 ${isDark ? 'border-gray-700' : 'border-gray-200'}`}>
             <span className="flex items-center gap-1"><FaCalendarAlt size={9} className="text-indigo-400" /> {totalEvs} eventos</span>
             <span className="flex items-center gap-1"><FaCheck size={9} className="text-emerald-400" /> {doneTasks}/{totalTasks} tareas</span>
@@ -754,9 +788,9 @@ const Calendario = () => {
 
       {/* ── Calendar body ────────────────────────────── */}
       <div className={`flex-1 overflow-hidden flex flex-col ${isDark ? 'bg-gray-900' : 'bg-white'}`}>
-        {view === 'semana' && <WeekView />}
-        {view === 'mes'    && <MonthView />}
-        {view === 'agenda' && <AgendaView />}
+        {view === 'semana' && renderWeekView()}
+        {view === 'mes'    && renderMonthView()}
+        {view === 'agenda' && renderAgendaView()}
       </div>
 
       {/* ── Modal ────────────────────────────────────── */}
@@ -766,9 +800,10 @@ const Calendario = () => {
           calType={calType}
           sucursales={sucursales}
           user={user}
+          branchId={branchId}
           ds={ds}
-          onSave={perm.crear || perm.editar ? handleSave : null}
-          onDelete={perm.eliminar ? () => handleDelete(modal.initial?.id) : null}
+          onSave={!modal.initial?.automatic && (modal.initial?.id ? perm.editar : perm.crear) ? handleSave : null}
+          onDelete={!modal.initial?.automatic && perm.eliminar ? () => handleDelete(modal.initial?.id) : null}
           onClose={() => setModal(null)}
         />
       )}

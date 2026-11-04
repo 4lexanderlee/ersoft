@@ -2,10 +2,12 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useEmpresa } from '../../context/EmpresaContext';
+import { usePermission } from '../../hooks/usePermission';
 
 const SettingsModal = ({ onClose }) => {
-  const { logout, user } = useAuth();
+  const { logout } = useAuth();
   const { empresa } = useEmpresa();
+  const { can } = usePermission();
   const navigate = useNavigate();
   const ref = useRef(null);
 
@@ -19,6 +21,7 @@ const SettingsModal = ({ onClose }) => {
     { label: 'Roles y Permisos', path: '/empresa/roles-per' },
     { label: 'Usuarios', path: '/empresa/usuarios' },
     { label: 'Metodos de pago', path: '/empresa/metodos-pago' },
+    ...(can('auditoria', 'VER') ? [{ label: 'Auditoría', path: '/empresa/auditoria' }] : []),
   ];
 
   // Other menu items (Guía, Soporte, Salir)
@@ -52,8 +55,8 @@ const SettingsModal = ({ onClose }) => {
       ref={ref}
       className="absolute bottom-12 left-12 w-56 bg-white rounded-2xl shadow-2xl py-2 z-50"
     >
-      {/* Empresa Button (wraps hover submenu) - Only visible to Master or Administrador */}
-      {(user?.role === 'Master' || user?.role === 'Administrador') && (
+      {/* Empresa Button (wraps hover submenu) - Controlled by RBAC usePermission */}
+      {can('empresa', 'VER') && (
         <div
           className="relative"
           onMouseEnter={() => setShowSubmenu(true)}

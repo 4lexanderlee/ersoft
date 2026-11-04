@@ -8,6 +8,11 @@ import {
   FaPencilAlt, FaSave, FaTimes, FaBuilding, FaImage, FaUpload,
 } from 'react-icons/fa';
 import PageHeader from '../../components/ui/PageHeader';
+import Card from '../../components/ui/Card';
+import Input from '../../components/ui/Input';
+import Badge from '../../components/ui/Badge';
+import { usePermission } from '../../hooks/usePermission';
+import { logAuditAction } from '../../data/simulatedAudit';
 
 /* ─────────────────────────────────────────────────────────
    VALIDATORS
@@ -105,6 +110,7 @@ function validateAll(form) {
 /* ─────────────────────────────────────────────────────────
    SUB-COMPONENTS
    ───────────────────────────────────────────────────────── */
+// eslint-disable-next-line no-unused-vars
 const SectionTitle = ({ icon: Icon, title, theme }) => (
   <div className={`flex items-center gap-2 mb-4 pb-2 border-b ${theme === 'dark' ? 'border-gray-600 text-white' : 'border-gray-300 text-gray-800'}`}>
     <Icon className="text-yellow-500" />
@@ -264,14 +270,13 @@ const ConfirmModal = ({ onConfirm, onCancel, theme }) => {
 const PasswordModal = ({ onConfirm, onCancel, theme }) => {
   const [pwd, setPwd]     = useState('');
   const [error, setError] = useState('');
-  const { login, user }   = useAuth();
+  const { verifyPassword } = useAuth();
   const cardCls  = theme === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-900';
   const inputCls = theme === 'dark' ? 'bg-gray-700 border-gray-600 text-white' : 'bg-gray-50 border-gray-300 text-gray-900';
 
   const handleSubmit = e => {
     e.preventDefault();
-    const result = login(user.username, pwd);
-    if (result.success) { onConfirm(); }
+    if (verifyPassword(pwd)) { onConfirm(); }
     else { setError('Contraseña incorrecta. Inténtalo nuevamente.'); }
   };
 
@@ -314,6 +319,8 @@ const PasswordModal = ({ onConfirm, onCancel, theme }) => {
    ───────────────────────────────────────────────────────── */
 const DatosUbi = () => {
   const ds = useDS();
+  const { can } = usePermission();
+  const { user } = useAuth();
   const { theme } = useTheme();
   const { empresa, updateEmpresa } = useEmpresa();
   const navigate = useNavigate();
@@ -354,7 +361,9 @@ const DatosUbi = () => {
   };
 
   const handleSaveClick = () => {
+    if (!can('empresa', 'EDITAR')) return;
     const errs = validateAll(form);
+    if (form.modo_facturacion !== 'INTERNO_PRE_FORMALIZACION' && (!form.usuario_sol_secundario?.trim() || !form.certificado_digital)) errs.sunat = 'Completa el usuario SOL secundario y carga el certificado simulado.';
     setErrors(errs);
     if (Object.keys(errs).length === 0) {
       setShowConfirm(true);
@@ -367,7 +376,9 @@ const DatosUbi = () => {
   };
 
   const handlePasswordConfirmed = () => {
+    if (!can('empresa', 'EDITAR')) return;
     updateEmpresa(form);
+    logAuditAction({ usuario: user.name, sucursalId: user.sucursal_id, modulo: 'EMPRESA', tipoAccion: 'EDITAR', descripcion: 'Actualización de configuración de empresa y modo de facturación', datosPrevios: empresa, datosNuevos: form });
     setShowPassword(false);
     setEditing(false);
     setErrors({});
@@ -415,6 +426,7 @@ const DatosUbi = () => {
             </>
           ) : (
             <button
+              disabled={!can('empresa', 'EDITAR')}
               onClick={() => { setForm(empresa); setEditing(true); }}
               className={`flex items-center gap-2 px-4 py-2 rounded-xl font-semibold text-sm transition-colors
                 ${theme === 'dark' ? 'bg-gray-700 hover:bg-gray-600 text-white' : 'bg-white hover:bg-gray-100 text-gray-800 border border-gray-300'}`}
@@ -487,6 +499,82 @@ const DatosUbi = () => {
             <Field {...fp('igv', 'IGV (%)', { type: 'number', step: '0.1', min: '0', max: '100' })} />
           </div>
         </div>
+
+        {/* CARD SUNAT: Modo de Facturación, Usuario SOL y Certificado Digital (RF-02 y RN-09) */}
+        <Card className={`space-y-4 ${ds.text}`}>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <h2 className="font-bold text-sm uppercase tracking-wider">Facturación Electrónica SUNAT (RF-02 / RN-09)</h2>
+              <p className={`text-xs mt-0.5 ${ds.muted}`}>Configura el régimen operativo de emisión de comprobantes y credenciales OSE/SOL.</p>
+            </div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge dot color={form.modo_facturacion === 'SUNAT_PRODUCCION' ? 'green' : form.modo_facturacion === 'SUNAT_BETA' ? 'blue' : 'amber'}>
+                {form.modo_facturacion === 'INTERNO_PRE_FORMALIZACION' ? 'Nota de Venta NV01' : form.modo_facturacion === 'SUNAT_BETA' ? 'SUNAT Beta (Pruebas)' : 'SUNAT Producción (UBL 2.1)'}
+              </Badge>
+              <Badge color={form.certificado_digital ? 'teal' : 'gray'}>
+                {form.certificado_digital ? 'Certificado Activo' : 'Sin Certificado'}
+              </Badge>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <Input
+              as="select"
+              label="Modo de Facturación"
+              aria-label="Modo de Facturación"
+              value={form.modo_facturacion || 'INTERNO_PRE_FORMALIZACION'}
+              disabled={!editing}
+              onChange={e => {
+                handleChange({ target: { name: 'modo_facturacion', value: e.target.value } });
+                setErrors(prev => ({ ...prev, sunat: '' }));
+              }}
+            >
+              <option value="INTERNO_PRE_FORMALIZACION">INTERNO_PRE_FORMALIZACION · Nota de Venta NV01</option>
+              <option value="SUNAT_BETA">SUNAT_BETA · Entorno de Homologación</option>
+              <option value="SUNAT_PRODUCCION">SUNAT_PRODUCCION · Emisión Oficial UBL 2.1</option>
+            </Input>
+
+            <Input
+              label="Usuario SOL Secundario"
+              aria-label="Usuario SOL Secundario"
+              name="usuario_sol_secundario"
+              placeholder="Ej. 20123456789MODDATOS"
+              value={form.usuario_sol_secundario || ''}
+              disabled={!editing}
+              onChange={e => { handleChange(e); setErrors(prev => ({ ...prev, sunat: '' })); }}
+              maxLength={40}
+              autoComplete="off"
+            />
+          </div>
+
+          {editing && (
+            <Input
+              type="file"
+              label="Certificado Digital (.pfx / .p12)"
+              aria-label="Certificado Digital"
+              accept=".pfx,.p12"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (!file) return;
+                if (!/\.(pfx|p12)$/i.test(file.name) || file.size === 0) {
+                  setErrors(prev => ({ ...prev, sunat: 'Selecciona un certificado .pfx o .p12 no vacío.' }));
+                  e.target.value = '';
+                  return;
+                }
+                setForm(prev => ({ ...prev, certificado_digital: { nombre: file.name, size: file.size, simulado: true, fecha_carga: new Date().toISOString() } }));
+                setErrors(prev => ({ ...prev, sunat: '' }));
+              }}
+            />
+          )}
+
+          <p className={`text-xs ${ds.muted}`}>
+            {form.certificado_digital?.nombre
+              ? `Certificado cargado: ${form.certificado_digital.nombre} (${Math.max(1, Math.round((form.certificado_digital.size || 0) / 1024))} KB)`
+              : 'Sin certificado digital cargado (.pfx / .p12)'}
+            {' · '}Carga simulada local en navegador.
+          </p>
+          {errors.sunat && <p role="alert" className="text-xs text-red-400">{errors.sunat}</p>}
+        </Card>
 
         {/* CARD 2: Ubicación y Contacto */}
         <div className={`rounded-2xl border p-6 ${ds.cardBg}`}>

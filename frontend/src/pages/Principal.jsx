@@ -149,6 +149,7 @@ const Principal = () => {
     { label: 'Calendario',              icon: <FaCalendarAlt size={14} />, path: '/calendario' },
     { label: 'Nueva Venta',             icon: <FaShoppingCart size={14} />, path: '/ventas', state: { preloadedClient: currentClient } },
     { label: 'Tickets / Boletas',       icon: <FaFileInvoiceDollar size={14} />, path: '/tbf' },
+    { label: 'Rendiciones',             icon: <FaFileInvoiceDollar size={14} />, path: '/rendiciones' },
     { label: 'Herramientas',            icon: <FaTools size={14} />, path: '/herramientas' },
   ];
 

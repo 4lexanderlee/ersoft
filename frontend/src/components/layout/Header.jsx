@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import ThemeToggle from '../ui/ThemeToggle';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
+import { useDS } from '../../hooks/useDS';
 
 const getProfileData = (currentUser) => {
   if (!currentUser) return { sexo: 'Masculino', name: 'USUARIO' };
@@ -31,7 +32,8 @@ const getProfileData = (currentUser) => {
 
 const Header = () => {
   const { theme } = useTheme();
-  const { user } = useAuth();
+  const ds = useDS();
+  const { user, simulateRole } = useAuth();
   const [profileData, setProfileData] = useState(() => getProfileData(user));
 
   // Re-read name + gender whenever user changes or storage is updated
@@ -45,7 +47,7 @@ const Header = () => {
     return () => window.removeEventListener('storage', onStorage);
   }, [user]);
 
-  const bgClass   = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-[#e8e3e8] border-gray-200';
+  const bgClass   = ds.headerBg;
   const textClass = theme === 'dark' ? 'text-white' : 'text-black';
   const roleClass = theme === 'dark' ? 'text-gray-300' : 'text-gray-700';
 
@@ -59,9 +61,26 @@ const Header = () => {
         {greeting}, {displayName}
       </h2>
 
-      {/* Role + Toggle */}
+      {/* Role, development simulator and theme */}
       <div className="flex items-center gap-4">
-        <span className={`font-medium ${roleClass}`}>{user?.role || 'Master'}</span>
+        {import.meta.env.DEV ? (
+          <label className="flex items-center gap-2">
+            <span className={`text-xs ${roleClass}`}>Simular rol</span>
+            <select
+              aria-label="Simular rol RBAC"
+              value={user?.rol || 'MASTER'}
+              onChange={(event) => simulateRole(event.target.value)}
+              className={`rounded-lg border px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-yellow-400 ${ds.inputCls}`}
+            >
+              <option value="MASTER">MASTER</option>
+              <option value="ADMINISTRADOR">ADMINISTRADOR</option>
+              <option value="CAJERO">CAJERO</option>
+              <option value="ALMACENERO">ALMACENERO</option>
+            </select>
+          </label>
+        ) : (
+          <span className={`font-medium ${roleClass}`}>{user?.rol || 'MASTER'}</span>
+        )}
         <ThemeToggle />
       </div>
     </header>

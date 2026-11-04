@@ -4,9 +4,11 @@ import Sidebar from './Sidebar';
 import Header from './Header';
 import AppFooter from '../ui/AppFooter';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 const MainLayout = () => {
   const { theme } = useTheme();
+  const { user } = useAuth();
 
   return (
     <div className={`flex h-screen w-full overflow-hidden transition-colors duration-300 ${
@@ -24,7 +26,7 @@ const MainLayout = () => {
         {/* Page content — footer remains fixed at the bottom, inner div scrolls */}
         <main className="flex-1 overflow-hidden flex flex-col min-h-0">
           <div className="flex-1 overflow-x-hidden overflow-y-auto p-6 flex flex-col min-h-0 relative">
-            <Outlet />
+            <Outlet key={`${user?.id}:${user?.rol}:${user?.sucursal_id}`} />
           </div>
           <AppFooter />
         </main>

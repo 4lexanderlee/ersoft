@@ -1,3 +1,4 @@
+/* eslint-disable react-refresh/only-export-components */
 import React, { createContext, useContext, useState } from 'react';
 
 const EmpresaContext = createContext();
@@ -22,6 +23,9 @@ const DEFAULT_EMPRESA = {
   ubigeo: '150122',              // UBIGEO 6 dígitos
   encargado: 'Alexander Lee',
   // Facturación
+  modo_facturacion: 'INTERNO_PRE_FORMALIZACION',
+  usuario_sol_secundario: '',
+  certificado_digital: null,
   serieFactura: 'F001',
   serieBoleta: 'B001',
   igv: '18',
@@ -34,7 +38,7 @@ const DEFAULT_EMPRESA = {
 export const EmpresaProvider = ({ children }) => {
   const [empresa, setEmpresa] = useState(() => {
     const saved = localStorage.getItem('ersoft_empresa');
-    return saved ? JSON.parse(saved) : DEFAULT_EMPRESA;
+    return saved ? { ...DEFAULT_EMPRESA, ...JSON.parse(saved) } : DEFAULT_EMPRESA;
   });
 
   const updateEmpresa = (newData) => {

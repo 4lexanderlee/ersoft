@@ -12,6 +12,16 @@ import {
 import { MdTune } from 'react-icons/md';
 import PageHeader from '../components/ui/PageHeader';
 import RefreshButton from '../components/ui/RefreshButton';
+import { useCRM } from '../context/CRMContext';
+import { useFinanzas } from '../context/FinanzasContext';
+import { usePermission } from '../hooks/usePermission';
+import { useDS } from '../hooks/useDS';
+import { todayLima, getBranches } from '../utils/businessData';
+import { validateSale } from '../utils/saleRules';
+import Card from '../components/ui/Card';
+import Input from '../components/ui/Input';
+import Btn from '../components/ui/Btn';
+import Badge from '../components/ui/Badge';
 import {
   validateDocNumber, validatePhone, validateEmail,
   validateName, sanitizeName, sanitizePhone, sanitizeDocNumber,
@@ -22,16 +32,15 @@ import {
    HELPERS
 ───────────────────────────────────────────────────────────────── */
 const DOC_TYPES = ['DNI', 'CE', 'RUC'];
-const DOC_MAX = { DNI: 8, CE: 9, RUC: 11 };
 const SALE_TYPES = ['Ticket', 'Boleta', 'Factura', 'Cotizar'];
 
 /* ─────────────────────────────────────────────────────────────────
    STEP 1 – Product selection + cart
 ───────────────────────────────────────────────────────────────── */
-const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
+const StepProductos = ({ cart, setCart, onNext, theme, pageBg, sucursalId, onSucursalChange, crmPreloadInfo }) => {
+  const { isGlobalScope } = usePermission();
   const navigate = useNavigate();
   const { productos, servicios, categorias, lotes, almacenes, refreshData } = useInventario();
-  const { user } = useAuth();
 
   const [typeFilter, setTypeFilter] = useState('Todos');
   const [searchText, setSearchText] = useState('');
@@ -43,7 +52,7 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const [showCatMenu, setShowCatMenu] = useState(false);
   const [showLoteMenu, setShowLoteMenu] = useState(false);
   const [showAlmacenMenu, setShowAlmacenMenu] = useState(false);
-  const [showCart, setShowCart] = useState(false);
+  const [showCart, setShowCart] = useState(() => cart.length > 0);
   // Fix 4: raw input values map (allows empty string while typing)
   const [rawInputs, setRawInputs] = useState({});
 
@@ -51,7 +60,6 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
   const catRef = useRef(null);
   const loteRef = useRef(null);
   const almacenRef = useRef(null);
-  const cartRef = useRef(null);
 
   // Close dropdowns on outside click
   useEffect(() => {
@@ -65,14 +73,14 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     return () => document.removeEventListener('mousedown', handler);
   }, []);
 
-  const isMaster = user?.role === 'Master';
-  const userSucursalId = user?.sucursalId || '1';
-  const allowedAlmacenes = (almacenes || []).filter(w => isMaster || w.sucursalId === userSucursalId);
+  const isMaster = false; // A POS sale belongs to exactly one branch, including for MASTER.
+  const userSucursalId = String(sucursalId);
+  const allowedAlmacenes = (almacenes || []).filter(w => String(w.sucursalId) === userSucursalId);
 
   const allowedLotes = lotes.filter(l => {
     const almacenOfLote = almacenes.find(w => Number(w.id) === Number(l.almacenId));
     if (!almacenOfLote) return false;
-    const matchesBranch = isMaster || almacenOfLote.sucursalId === userSucursalId;
+    const matchesBranch = String(almacenOfLote.sucursalId) === userSucursalId;
     const matchesAlmacen = !almacenFilter || Number(l.almacenId) === Number(almacenFilter);
     return matchesBranch && matchesAlmacen;
   });
@@ -176,7 +184,6 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     }
   };
 
-  const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
   const inputCls = theme === 'dark'
     ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500'
     : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400';
@@ -187,7 +194,19 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
     <div className={`flex flex-col flex-1 min-h-0 -m-6 ${pageBg}`}>
       <PageHeader
         onBack={() => navigate('/principal')}
-        right={<RefreshButton onRefresh={refreshData} />}
+        right={
+          <>
+            {crmPreloadInfo && (
+              <Badge color="purple" dot>
+                CRM: {crmPreloadInfo.oportunidadId}
+              </Badge>
+            )}
+            <Input as="select" aria-label="Sucursal POS" value={sucursalId} disabled={!isGlobalScope || cart.length > 0} onChange={e => onSucursalChange(e.target.value)}>
+              {getBranches().filter(b => isGlobalScope || String(b.id) === String(sucursalId)).map(b => <option key={b.id} value={b.id}>{b.nombre || b.nombreComercial}</option>)}
+            </Input>
+            <RefreshButton onRefresh={refreshData} />
+          </>
+        }
       />
 
       {/* Main */}
@@ -444,8 +463,8 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
                         <p className={`text-xs font-bold uppercase truncate ${theme === 'dark' ? 'text-gray-100' : 'text-gray-800'}`}>{item.nombre}</p>
                         <p className={`text-xs mt-0.5 ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
                           {item.unidadMedida === 'Kilogramo'
-                            ? `⚖️ ${parseFloat(qty).toFixed(3)} kg  Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`
-                            : `Cant. ${qty}  Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`}
+                            ? `⚖️ ${parseFloat(qty).toFixed(3)} kg · Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`
+                            : `Cant. ${qty} · Total: S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`}
                         </p>
                       </div>
                       <button onClick={() => removeFromCart(item.id)} className="ml-3 text-red-400 hover:text-red-500 transition-colors shrink-0">
@@ -497,7 +516,12 @@ const StepProductos = ({ cart, setCart, onNext, theme, pageBg, headerBg }) => {
 /* ─────────────────────────────────────────────────────────────────
    STEP 2 – Client data + order description
 ───────────────────────────────────────────────────────────────── */
-const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
+const StepCliente = ({ cart, onBack, onNext, theme, pageBg, preloadedClient, sucursalId }) => {
+  const ds = useDS();
+  const { can } = usePermission();
+  const [condicionPago, setCondicionPago] = useState('CONTADO');
+  const [fechaVencimiento, setFechaVencimiento] = useState('');
+  const [saleError, setSaleError] = useState('');
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
@@ -506,7 +530,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const [client, setClient] = useState(null);
   const [clientForm, setClientForm] = useState({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' });
   const [clientErrors, setClientErrors] = useState({});
-  const [notFound, setNotFound] = useState(false);
   const [saleType, setSaleType] = useState('Ticket');
   const [discountCode, setDiscountCode] = useState('');
   const [appliedCodes, setAppliedCodes] = useState([]);
@@ -517,7 +540,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
   // Pre-load client passed from Principal (Venta button)
   useEffect(() => {
-    const preloaded = location.state?.preloadedClient;
+    const preloaded = preloadedClient || location.state?.preloadedClient;
     if (preloaded) {
       setClient(preloaded);
       setDocType(preloaded.docType || 'DNI');
@@ -555,7 +578,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
         return `${year}-${month}-${day}`;
       };
       const todayStr = getLocalDateString();
-      const userSucursalId = user?.sucursalId || '1';
+      const userSucursalId = sucursalId;
 
       return promos.filter(p => {
         if (p.estado !== 'Activo') return false;
@@ -659,7 +682,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
     return { rate: subtotal > 0 ? (totalDiscountAmt / subtotal) : 0, amt: totalDiscountAmt };
   };
 
-  const igvRate = parseFloat(empresa?.igv) || 0;
+  const igvRate = 18;
   const { rate: discount, amt: discountAmt } = calcDiscount();
   const total = Math.max(0, subtotal - discountAmt);
   const opGravada = total / (1 + (igvRate / 100));
@@ -667,10 +690,10 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
   const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
   const inputCls = theme === 'dark' ? 'bg-transparent border-gray-600 text-white placeholder-gray-500' : 'bg-transparent border-gray-300 text-gray-900 placeholder-gray-400';
-  const cardBg = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
   const sectionBg = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-white border-gray-200';
 
   const handleSearch = () => {
+    setSaleError('');
     const allClients = [
       ...simulatedClients,
       ...JSON.parse(localStorage.getItem('ersoft_clients') || '[]'),
@@ -678,7 +701,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
     const found = allClients.find(c => c.docType === docType && c.docNumber === docNumber);
     if (found) {
       setClient(found);
-      setNotFound(false);
       setClientForm({
         nombre: found.name || '',
         apellidos: found.surname || '',
@@ -688,7 +710,6 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
       });
     } else {
       setClient(null);
-      setNotFound(true);
       setClientForm({ nombre: '', apellidos: '', documento: docNumber, telefono: '', correo: '' });
     }
   };
@@ -696,11 +717,14 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   const handleKeyDown = (e) => { if (e.key === 'Enter') handleSearch(); };
 
   const handleAddClient = () => {
+    setSaleError('');
     const effectiveDocNumber = docNumber.trim() || clientForm.documento.trim();
     const errs = {};
 
-    const eNombre    = validateName(clientForm.nombre, 'Nombres');
-    const eApellidos = validateName(clientForm.apellidos, 'Apellidos');
+    const eNombre = docType === 'RUC'
+      ? (!clientForm.nombre?.trim() || clientForm.nombre.trim().length < 3 ? 'Razón Social es obligatoria (mín. 3 caracteres).' : null)
+      : validateName(clientForm.nombre, 'Nombres');
+    const eApellidos = docType === 'RUC' ? null : validateName(clientForm.apellidos, 'Apellidos');
     const eDoc       = validateDocNumber(docType, effectiveDocNumber);
     const eTel       = validatePhone(clientForm.telefono);
     const eEmail     = validateEmail(clientForm.correo);
@@ -737,7 +761,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
       localStorage.setItem('ersoft_clients', JSON.stringify([...saved, newClient]));
     }
     setClient(newClient);
-    setNotFound(false);
+    setClientForm(prev => ({ ...prev, documento: effectiveDocNumber }));
     setAddClientMsg('✓ Cliente guardado y seleccionado');
     setTimeout(() => setAddClientMsg(''), 3000);
   };
@@ -788,16 +812,15 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 
   const docPlaceholder = { DNI: '8 dígitos', CE: '9 dígitos', RUC: '11 dígitos' };
 
-  // Always allow saving client if not already selected and name filled
-  const canAddClient = !client && (clientForm.nombre.trim() || clientForm.apellidos.trim());
-
   // Lógica de visibilidad condicional de documentos
+  const billingMode = empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION';
   const isRusRucEmpresa = empresa?.tipoDocumento === 'RUS' || empresa?.tipoDocumento === 'RUC';
   const isRucEmpresa = empresa?.tipoDocumento === 'RUC';
   
   const availableSaleTypes = SALE_TYPES.filter(type => {
+    if (billingMode === 'INTERNO_PRE_FORMALIZACION') return ['Ticket', 'Cotizar'].includes(type);
     if (type === 'Cotizar') return true;
-    if (type === 'Ticket') return ['DNI', 'RUS', 'RUC'].includes(docType); // Siempre visible si es uno de estos
+    if (type === 'Ticket') return ['DNI', 'CE', 'RUS', 'RUC'].includes(docType);
     if (type === 'Boleta') return isRusRucEmpresa;
     if (type === 'Factura') return isRucEmpresa;
     return true;
@@ -811,13 +834,27 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
   }, [docType, availableSaleTypes, saleType]);
 
   const handleCotizar = () => {
-    const igvRate = parseFloat(empresa?.igv) || 0;
+    const igvRate = 18;
     const opGravada = total / (1 + (igvRate / 100));
     const igvMonto = total - opGravada;
     const saleData = { client: clientForm, saleType, discount, discountAmt, subtotal, total, opGravada, igvMonto, igvRate };
     const html = buildProformaHTML(empresa, cart, saleData, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
+  };
+
+  const proceed = () => {
+    if (!can('ventas_caja', 'CREAR')) return;
+    const effectiveDoc = clientForm.documento?.trim() || docNumber?.trim() || '';
+    const data = {
+      client: { ...clientForm, documento: effectiveDoc, docType },
+      saleType, discount, discountAmt, total, subtotal, opGravada, igvMonto, igvRate,
+      condicion_pago: condicionPago, fecha_vencimiento: condicionPago === 'CREDITO' ? fechaVencimiento : null, sucursalId,
+    };
+    const error = validateSale(data, billingMode);
+    if (error) return setSaleError(error);
+    setSaleError('');
+    onNext(data);
   };
 
   return (
@@ -830,13 +867,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
         <div className="flex-1 min-h-0 overflow-y-auto px-8 py-5 space-y-4">
           {/* Doc search bar */}
           <div className="flex items-center gap-3">
-            <select value={docType} onChange={e => { setDocType(e.target.value); setDocNumber(''); setClient(null); setNotFound(false); setClientErrors({}); }}
+            <select value={docType} onChange={e => { setDocType(e.target.value); setDocNumber(''); setClient(null); setClientErrors({}); setSaleError(''); }}
               className={`px-3 py-2 border rounded-full text-sm outline-none ${theme === 'dark' ? 'bg-gray-800 border-gray-600 text-white' : 'bg-white border-gray-300 text-gray-900'}`}>
               {DOC_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
             </select>
             <input
               value={docNumber}
-              onChange={e => setDocNumber(sanitizeDocNumber(docType, e.target.value))}
+              onChange={e => { setDocNumber(sanitizeDocNumber(docType, e.target.value)); setSaleError(''); }}
               onKeyDown={handleKeyDown}
               placeholder={`Digite aquí la documentación del cliente (${docPlaceholder[docType]})`}
               className={`flex-1 px-4 py-2 border rounded-full text-sm outline-none focus:ring-1 focus:ring-yellow-500 ${theme === 'dark' ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500' : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'}`}
@@ -847,30 +884,40 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
             </button>
           </div>
 
-          {/* Sale type tabs */}
-          <div className={`flex rounded-none overflow-hidden border-b-0 ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-[#1a1a1a]'}`}>
-            {availableSaleTypes.map(t => (
-              <button key={t} onClick={() => setSaleType(t)}
-                className={`flex-1 py-2.5 text-sm font-semibold transition-colors
-                  ${saleType === t ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
-                {t}
-              </button>
-            ))}
+          {/* SUNAT Mode indicator + Sale type tabs */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2 flex-wrap">
+              <span className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Tipo de comprobante</span>
+              <Badge dot color={billingMode === 'SUNAT_PRODUCCION' ? 'green' : billingMode === 'SUNAT_BETA' ? 'blue' : 'amber'}>
+                {billingMode === 'INTERNO_PRE_FORMALIZACION' ? 'Modo Interno · NV01' : billingMode === 'SUNAT_BETA' ? 'SUNAT Beta · UBL 2.1' : 'SUNAT Producción · UBL 2.1'}
+              </Badge>
+            </div>
+            <div className={`flex rounded-none overflow-hidden border-b-0 ${theme === 'dark' ? 'bg-[#1a1a1a]' : 'bg-[#1a1a1a]'}`}>
+              {availableSaleTypes.map(t => (
+                <button key={t} onClick={() => { setSaleType(t); setSaleError(''); }}
+                  className={`flex-1 py-2.5 text-sm font-semibold transition-colors
+                    ${saleType === t ? 'text-white underline underline-offset-4' : 'text-gray-400 hover:text-gray-200'}`}>
+                  {t === 'Ticket' ? 'Nota de Venta NV01' : t === 'Boleta' ? 'Boleta (B001)' : t === 'Factura' ? 'Factura (F001)' : t}
+                </button>
+              ))}
+            </div>
           </div>
 
           {/* Client form fields */}
           <div className={`rounded-2xl border p-5 space-y-3 ${sectionBg}`}>
-            {/* Nombres */}
+            {/* Nombres / Razón Social */}
             <div className="flex items-start gap-2 border-b pb-2">
-              <label className={`text-sm w-24 pt-1 ${text}`}>Nombres <span className="text-red-500">*</span></label>
+              <label className={`text-sm w-24 pt-1 ${text}`}>{docType === 'RUC' ? 'Razón Soc.' : 'Nombres'} <span className="text-red-500">*</span></label>
               <div className="flex-1">
                 <input
                   value={clientForm.nombre}
                   onChange={e => {
-                    setClientForm(p => ({ ...p, nombre: sanitizeName(e.target.value) }));
+                    const nextVal = docType === 'RUC' ? e.target.value.slice(0, 80) : sanitizeName(e.target.value);
+                    setClientForm(p => ({ ...p, nombre: nextVal }));
+                    setSaleError('');
                     if (clientErrors.nombre) setClientErrors(p => { const n={...p}; delete n.nombre; return n; });
                   }}
-                  placeholder="ej. Rodrigo Alberto"
+                  placeholder={docType === 'RUC' ? 'ej. Constructora B EIRL' : 'ej. Rodrigo Alberto'}
                   disabled={!!client}
                   className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
                     ${clientErrors.nombre ? 'border-red-500' : ''}`}
@@ -880,15 +927,16 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
             </div>
             {/* Apellidos */}
             <div className="flex items-start gap-2 border-b pb-2">
-              <label className={`text-sm w-24 pt-1 ${text}`}>Apellidos <span className="text-red-500">*</span></label>
+              <label className={`text-sm w-24 pt-1 ${text}`}>Apellidos {docType !== 'RUC' && <span className="text-red-500">*</span>}</label>
               <div className="flex-1">
                 <input
                   value={clientForm.apellidos}
                   onChange={e => {
                     setClientForm(p => ({ ...p, apellidos: sanitizeName(e.target.value) }));
+                    setSaleError('');
                     if (clientErrors.apellidos) setClientErrors(p => { const n={...p}; delete n.apellidos; return n; });
                   }}
-                  placeholder="ej. Garcia Peréz"
+                  placeholder={docType === 'RUC' ? 'Opcional para RUC' : 'ej. Garcia Peréz'}
                   disabled={!!client}
                   className={`w-full text-sm border-b bg-transparent outline-none py-1 ${inputCls} disabled:opacity-60
                     ${clientErrors.apellidos ? 'border-red-500' : ''}`}
@@ -903,6 +951,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
                 <input value={clientForm.documento}
                   onChange={e => {
                     setClientForm(p => ({ ...p, documento: sanitizeDocNumber(docType, e.target.value) }));
+                    setSaleError('');
                     if (clientErrors.documento) setClientErrors(p => { const n={...p}; delete n.documento; return n; });
                   }}
                   placeholder={docPlaceholder[docType]} disabled={!!client}
@@ -961,7 +1010,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
               <div className="flex items-center justify-between px-1">
                 <span className="text-green-400 text-sm font-semibold">✓ Cliente seleccionado</span>
                 <button
-                  onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setClientErrors({}); setNotFound(false); setAddClientMsg(''); }}
+                  onClick={() => { setClient(null); setDocNumber(''); setClientForm({ nombre: '', apellidos: '', documento: '', telefono: '', correo: '' }); setClientErrors({}); setAddClientMsg(''); setSaleError(''); }}
                   className="text-xs text-red-400 hover:text-red-300 underline"
                 >
                   Cambiar cliente
@@ -970,6 +1019,13 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
             )}
           </div>
 
+          <Card className={`space-y-3 ${ds.text}`}>
+            <Input label="Condición de pago" aria-label="Condición de pago" as="select" value={condicionPago} onChange={e => { setCondicionPago(e.target.value); setSaleError(''); }}>
+              <option value="CONTADO">CONTADO</option><option value="CREDITO">CREDITO</option>
+            </Input>
+            {condicionPago === 'CREDITO' && <Input label="Fecha de vencimiento" aria-label="Fecha de vencimiento" type="date" min={todayLima()} value={fechaVencimiento} onChange={e => { setFechaVencimiento(e.target.value); setSaleError(''); }} required />}
+            {saleError && <p role="alert" className="text-sm text-red-400">{saleError}</p>}
+          </Card>
           {/* Back */}
           <button onClick={onBack} className={`text-sm ${theme === 'dark' ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'} underline`}>
             ← Volver a productos
@@ -1049,7 +1105,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
                 COTIZAR
               </button>
             ) : (
-              <button onClick={() => onNext({ client: clientForm, saleType, discount, discountAmt, total, subtotal, opGravada, igvMonto, igvRate })}
+              <button onClick={proceed}
                 className="w-full py-3 bg-gray-700 hover:bg-yellow-500 hover:text-black text-white font-bold rounded-full text-sm flex items-center justify-center gap-2 mt-2 transition-colors duration-300 cursor-pointer">
                 IR A PAGAR <FaArrowLeft className="rotate-180" />
               </button>
@@ -1066,7 +1122,7 @@ const StepCliente = ({ cart, onBack, onNext, theme, pageBg, headerBg }) => {
 ───────────────────────────────────────────────────────────────── */
 
 // Ticket HTML generator — opens in new tab and auto-prints
-const TIPO_PREFIX = { Ticket: 'TKT', Boleta: 'BOL', Factura: 'FAC', Cotizar: 'COT' };
+const TIPO_PREFIX = { Ticket: 'NV01', Boleta: 'B001', Factura: 'F001', Cotizar: 'COT' };
 const genSaleId = (tipo) => `${TIPO_PREFIX[tipo] || 'TKT'}-${Date.now().toString().slice(-8)}`;
 
 const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) => {
@@ -1078,10 +1134,16 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
       <td style="text-align:right">S/. ${parseFloat(item.precio || 0).toFixed(2)}</td>
       <td style="text-align:right">S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}</td>
     </tr>`).join('');
-  const payLabel = { digital: 'Billetera electrónica', bank: 'Transferencia / CCI', cash: 'Efectivo', pos: 'POS' }[payMethod] || payMethod;
+  const payLabel = {
+    digital: 'Billetera electrónica',
+    bank: 'Transferencia / CCI',
+    cash: 'Efectivo',
+    pos: 'POS',
+    credit: `Crédito (Vence: ${saleData?.fecha_vencimiento || '—'})`,
+  }[payMethod] || payMethod || '—';
   const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'Consumidor final';
   
-  const igvPct = parseFloat(empresa?.igv) || 0;
+  const igvPct = 18;
   const subtotal = saleData?.subtotal || 0;
   const dscAmt = saleData?.discountAmt || 0;
   const total = saleData?.total || 0;
@@ -1144,7 +1206,7 @@ const buildTicketHTML = (empresa, cart, saleData, payMethod, saleId, vendedor) =
       <p>¡Gracias por su compra!</p>
       <p>®ERSOFT - Todos los derechos reservados</p>
     </div>
-    <script>window.onload = () => { window.print(); }<\/script>
+    <script>window.onload = () => { window.print(); }</script>
   </body></html>`;
 };
 
@@ -1160,8 +1222,7 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
   const clientTel = saleData?.client?.telefono || 'No especificado';
   const clientEmail = saleData?.client?.correo || 'No especificado';
   
-  const proformaId = `PROF-${Date.now().toString().slice(-6)}`;
-  const igvPct = parseFloat(empresa?.igv) || 0;
+  const igvPct = 18;
   const subtotal = saleData?.subtotal || 0;
   const dscAmt = saleData?.discountAmt || (saleData?.discount ? subtotal * saleData.discount : 0);
   const total = saleData?.total || 0;
@@ -1178,7 +1239,9 @@ const buildProformaHTML = (empresa, cart, saleData, vendedor) => {
         qrSrc = dig.qrPath;
       }
     }
-  } catch (e) {}
+  } catch {
+    qrSrc = '';
+  }
 
   const qrTag = qrSrc
     ? `<img src="${qrSrc}" alt="QR" class="w-32 h-32 object-contain ml-4 rounded-lg shadow-sm border border-gray-100" />`
@@ -1372,14 +1435,19 @@ const PAYMENT_METHODS = [
   { key: 'pos',     label: 'POS', sub: 'Tarjeta de crédito / débito' },
 ];
 
-const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
+const StepPago = ({ saleData, cart, onBack, theme, pageBg }) => {
+  const ds = useDS();
+  const { can } = usePermission();
+  const { registrarVenta } = useFinanzas();
+  const [saleError, setSaleError] = useState('');
+  const savedRef = useRef(false);
   const navigate = useNavigate();
-  const { updateProducto, productos, bulkUpdateStock } = useInventario();
+  const { productos, servicios, lotes, almacenes, bulkUpdateStock } = useInventario();
   const { empresa } = useEmpresa();
   const { user } = useAuth();
 
   const [selectedMethod, setSelectedMethod] = useState(null);
-  const [metodosPago, setMetodosPago] = useState(() => {
+  const [metodosPago] = useState(() => {
     const saved = localStorage.getItem('ersoft_metodos_pago');
     return saved ? JSON.parse(saved) : [
       { id: 'cash', activo: true },
@@ -1529,10 +1597,50 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       popup.document.close();
     }
   };
+  const findCatalogItem = (item) => {
+    const isService = item._type === 'Servicio';
+    const list = isService ? servicios : productos;
+    const byId = list.find(p => String(p.id) === String(item.id) && p.nombre === item.nombre);
+    if (byId) return byId;
+    return list.find(p => p.nombre?.trim().toLowerCase() === item.nombre?.trim().toLowerCase() && (
+      isService
+        ? String(p.sucursalId || '1') === String(saleData.sucursalId)
+        : String(almacenes.find(a => String(a.id) === String(lotes.find(l => String(l.id) === String(p.loteId))?.almacenId))?.sucursalId) === String(saleData.sucursalId)
+    ));
+  };
+
   const saveComprobante = () => {
-    if (saleIdRef.current) return; // already saved
+    if (savedRef.current) return true;
+    if (!can('ventas_caja', 'CREAR')) { setSaleError('No tienes permiso para emitir ventas.'); return false; }
+    const validation = validateSale(saleData, empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION');
+    if (validation) { setSaleError(validation); return false; }
+    const required = new Map();
+    for (const { item, qty } of cart) {
+      const isService = item._type === 'Servicio';
+      const found = findCatalogItem(item);
+      if (!found && item._fromCRM) {
+        if (!(qty > 0) || String(item._crmSucursalId || saleData.sucursalId) !== String(saleData.sucursalId)) {
+          setSaleError(`Revisa el ítem ${item.nombre}: no corresponde al catálogo de esta sucursal.`); return false;
+        }
+        continue;
+      }
+      const lot = lotes.find(l => String(l.id) === String(found?.loteId));
+      const warehouse = almacenes.find(a => String(a.id) === String(lot?.almacenId));
+      const branch = isService ? found?.sucursalId || '1' : warehouse?.sucursalId;
+      if (!found || String(branch) !== String(saleData.sucursalId) || !(qty > 0)) {
+        setSaleError(`Revisa el ítem ${item.nombre}: no corresponde al catálogo de esta sucursal.`); return false;
+      }
+      if (!isService) {
+        const needed = (required.get(found.id) || 0) + qty; required.set(found.id, needed);
+        if (needed > Number(found.stock || 0)) { setSaleError(`Stock insuficiente: ${item.nombre}.`); return false; }
+      }
+    }
+    if (!cart.length) { setSaleError('El carrito está vacío.'); return false; }
+    if (saleData.condicion_pago !== 'CREDITO' && (!selectedMethod || (selectedMethod === 'cash' && Number(montoRecibido) < saleData.total))) {
+      setSaleError('Selecciona el medio de pago y completa el efectivo recibido.'); return false;
+    }
     const saleId = getSaleId();
-    const igvPct = parseFloat(empresa?.igv) || 0;
+    const igvPct = 18;
     const totalVal = saleData?.total || 0;
     const opGravadaVal = totalVal / (1 + (igvPct / 100));
     const igvMontoVal = totalVal - opGravadaVal;
@@ -1542,13 +1650,19 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       tipo: saleData?.saleType || 'Ticket',
       fecha: new Date().toISOString(),
       estado: 'Activo',
-      sucursalId: user?.sucursalId || '1',
+      sucursalId: saleData.sucursalId,
+      condicion_pago: saleData.condicion_pago,
+      fecha_vencimiento: saleData.fecha_vencimiento,
+      modo_facturacion: empresa.modo_facturacion || 'INTERNO_PRE_FORMALIZACION',
       cliente: saleData?.client || null,
       vendedor: user?.name || user?.username || 'Vendedor',
-      items: cart.map(({ item, qty }) => ({
-        id: item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
-        _type: item._type,
-      })),
+      items: cart.map(({ item, qty }) => {
+        const found = findCatalogItem(item);
+        return {
+          id: found?.id ?? item.id, nombre: item.nombre, precio: parseFloat(item.precio || 0), qty,
+          _type: item._type, tipo: item._type, costo: Number(found?.costo ?? item.costo ?? 0),
+        };
+      }),
       total: totalVal,
       subtotal: saleData?.subtotal || 0,
       discount: saleData?.discount || 0,
@@ -1556,7 +1670,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
       opGravada: opGravadaVal,
       igvMonto: igvMontoVal,
       igvRate: igvPct,
-      metodoPago: selectedMethod,
+      metodoPago: saleData.condicion_pago === 'CREDITO' ? 'credit' : selectedMethod,
       empresa: empresa ? {
         razonSocial: empresa.razonSocial,
         tipoDocumento: empresa.tipoDocumento,
@@ -1567,8 +1681,12 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
         logoPath: empresa.logoPath || null,
       } : null,
     };
-    const prev = JSON.parse(localStorage.getItem('ersoft_comprobantes') || '[]');
-    localStorage.setItem('ersoft_comprobantes', JSON.stringify([record, ...prev]));
+    try {
+      const created = registrarVenta(record);
+      if (created) deductStock();
+      savedRef.current = true;
+      return true;
+    } catch (error) { setSaleError(error.message); return false; }
   };
 
   const text  = theme === 'dark' ? 'text-white'     : 'text-gray-900';
@@ -1581,18 +1699,22 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   const deductStock = () => {
     const changes = cart
       .filter(({ item }) => item._type === 'Producto')
-      .map(({ item, qty }) => ({ id: item.id, delta: -qty }));
+      .map(({ item, qty }) => {
+        const found = findCatalogItem(item);
+        return found ? { id: found.id, delta: -qty } : null;
+      })
+      .filter(Boolean);
     if (changes.length > 0) bulkUpdateStock(changes);
   };
 
   const openTicket = () => {
-    saveComprobante(); // persist before anything else
+    if (!saveComprobante()) return;
     const saleId = getSaleId();
-    const html = buildTicketHTML(empresa, cart, saleData, selectedMethod, saleId, user?.name || user?.username || 'Vendedor');
+    const effectiveMethod = saleData?.condicion_pago === 'CREDITO' ? 'credit' : selectedMethod;
+    const html = buildTicketHTML(empresa, cart, saleData, effectiveMethod, saleId, user?.name || user?.username || 'Vendedor');
     const w = window.open('', '_blank');
     if (w) { w.document.write(html); w.document.close(); }
     // Deduct stock exactly once when ticket is generated
-    deductStock();
     setTicketGenerated(true);
     setWarnNoTicket(false);
     setShowQrModal(false);
@@ -1607,20 +1729,19 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
 
   const handleSendWhatsApp = () => {
     if (!phone.trim()) return;
-    saveComprobante(); // persist before sending
+    if (!saveComprobante()) return;
     const clientName = saleData?.client ? `${saleData.client.nombre} ${saleData.client.apellidos}` : 'cliente';
     const items = cart.map(({ item, qty }) => `• ${item.nombre} x${qty} = S/. ${(qty * parseFloat(item.precio || 0)).toFixed(2)}`).join('%0A');
     const msg = `*Comprobante de compra - ${empresa?.razonSocial || 'ERSOFT'}*%0AFecha: ${new Date().toLocaleString('es-PE')}%0ACliente: ${clientName}%0A%0A${items}%0A%0A*TOTAL: S/. ${(saleData?.total || 0).toFixed(2)}*%0A%0AGracias por su compra.`;
     window.open(`https://wa.me/${phone.replace(/\D/g,'')}?text=${msg}`, '_blank');
     // Deduct stock exactly once when message/ticket is sent
-    deductStock();
     setShowPhoneModal(false);
     setTicketGenerated(true);
     setWarnNoTicket(false);
   };
 
   /* ── right panel content ── */
-  const RightPanel = () => {
+  const renderRightPanel = () => {
     if (ticketGenerated) return (
       <div className="text-center px-8 space-y-6">
         <p className={`text-sm italic ${subTx}`}>Pago confirmed, puedes revisar el ticket en TBF</p>
@@ -1660,7 +1781,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
     }
 
     // Method selected, ticket not yet generated
-    const isCashInsufficient = selectedMethod === 'cash' && montoRecibido !== '' && parseFloat(montoRecibido) < saleData.total;
+    const isCashInsufficient = selectedMethod === 'cash' && (!Number.isFinite(Number(montoRecibido)) || Number(montoRecibido) < saleData.total);
 
     return (
       <div className="text-center px-8 space-y-6">
@@ -1693,9 +1814,17 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
   return (
     <div className={`flex flex-col flex-1 -m-6 ${pageBg}`}>
       <PageHeader onBack={() => navigate('/principal')} />
+      {saleError && <p role="alert" className="px-8 py-3 text-sm text-red-400">{saleError}</p>}
+      {saleData.condicion_pago === 'CREDITO' && <Card className={`m-6 space-y-3 ${ds.text}`}>
+        <p className="font-bold">Venta a crédito · {saleData.fecha_vencimiento}</p>
+        <p className={`text-sm ${ds.muted}`}>Se registrará una cuenta por cobrar. El cobro se registra posteriormente en Rendiciones.</p>
+        <Btn disabled={ticketGenerated} onClick={openTicket}>{ticketGenerated ? 'Cuenta por cobrar registrada' : 'Confirmar venta a crédito'}</Btn>
+        {ticketGenerated && <Btn variant="secondary" onClick={handleFinalizar}>Finalizar</Btn>}
+        {!ticketGenerated && <Btn variant="ghost" onClick={onBack}>Volver a datos del cliente</Btn>}
+      </Card>}
 
       {/* Body */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className={saleData.condicion_pago === 'CREDITO' ? 'hidden' : 'flex flex-1 overflow-hidden'}>
         {/* Left: Payment method cards */}
         <div className="flex-1 flex flex-col gap-3 px-8 py-6 max-w-lg">
           {PAYMENT_METHODS.map(pm => {
@@ -1703,7 +1832,8 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
             return (
               <div key={pm.key} className="w-full">
                 <button
-                  onClick={() => { setSelectedMethod(pm.key); setTicketGenerated(false); setWarnNoTicket(false); }}
+                  disabled={ticketGenerated}
+                  onClick={() => { setSelectedMethod(pm.key); setWarnNoTicket(false); }}
                   className={`w-full flex flex-col px-6 py-5 border-2 rounded-xl transition-all text-left relative
                     ${selectedMethod === pm.key
                       ? (isActive ? 'border-yellow-500 bg-yellow-500/5' : 'border-red-500 bg-red-500/5')
@@ -1762,7 +1892,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
               </div>
             );
           })}
-          <button onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
+          <button disabled={ticketGenerated} onClick={onBack} className={`text-sm mt-1 ${subTx} hover:underline text-left`}>
             ← Volver a datos del cliente
           </button>
         </div>
@@ -1771,7 +1901,7 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
         <div className={`flex-1 flex flex-col items-center justify-center border-l ${
           theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-gray-50 border-gray-200'
         }`}>
-          <RightPanel />
+          {renderRightPanel()}
         </div>
       </div>
 
@@ -1868,13 +1998,28 @@ const StepPago = ({ saleData, cart, onBack, theme, pageBg, headerBg }) => {
 ───────────────────────────────────────────────────────────────── */
 const Ventas = () => {
   const { theme } = useTheme();
+  const ds = useDS();
+  const { isGlobalScope, effectiveSucursalId } = usePermission();
+  const { posPreload, limpiarEnvioAPOS } = useCRM();
+  const { productos, servicios } = useInventario();
+  const [preload] = useState(() => posPreload && (isGlobalScope || String(posPreload.sucursalId) === String(effectiveSucursalId)) ? posPreload : null);
+  const [sucursalId, setSucursalId] = useState(() => String(preload?.sucursalId || effectiveSucursalId || getBranches()[0]?.id || ''));
+  const consumed = useRef(false);
+  useEffect(() => {
+    if (preload && !consumed.current) { consumed.current = true; limpiarEnvioAPOS(); }
+  }, [preload, limpiarEnvioAPOS]);
   const [step, setStep] = useState(1); // 1 | 2 | 3
-  const [cart, setCart] = useState([]);
+  const [cart, setCart] = useState(() => (preload?.cart || []).reduce((rows, line) => {
+    const type = line.item._type || (String(line.item.tipo).toUpperCase() === 'SERVICIO' ? 'Servicio' : 'Producto');
+    const source = (type === 'Servicio' ? servicios : productos).find(p => String(p.id) === String(line.item.id) && p.nombre === line.item.nombre);
+    const item = { ...line.item, ...source, precio: line.item.precio, _type: type };
+    const found = rows.find(row => row.item.id === item.id && row.item._type === type);
+    if (found) found.qty += line.qty; else rows.push({ item, qty: line.qty });
+    return rows;
+  }, []));
   const [saleData, setSaleData] = useState(null);
 
-  const pageBg   = theme === 'dark' ? 'bg-[#313b48]' : 'bg-[#d6d0d4]';
-  const headerBg = theme === 'dark' ? 'bg-gray-800 border-gray-700' : 'bg-[#e8e3e8] border-gray-200';
-  const sharedProps = { theme, pageBg, headerBg };
+  const sharedProps = { theme, pageBg: ds.pageBg, sucursalId, onSucursalChange: setSucursalId, preloadedClient: preload?.preloadedClient, crmPreloadInfo: preload };
 
   if (step === 1) return <StepProductos {...sharedProps} cart={cart} setCart={setCart} onNext={() => setStep(2)} />;
   if (step === 2) return <StepCliente  {...sharedProps} cart={cart} onBack={() => setStep(1)} onNext={data => { setSaleData(data); setStep(3); }} />;

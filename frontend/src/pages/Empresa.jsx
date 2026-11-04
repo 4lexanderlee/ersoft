@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
 import { useEmpresa } from '../context/EmpresaContext';
@@ -8,6 +8,36 @@ import {
   FaQrcode, FaUpload, FaImage,
 } from 'react-icons/fa';
 import PageHeader from '../components/ui/PageHeader';
+import { useDS } from '../hooks/useDS';
+import { usePermission } from '../hooks/usePermission';
+
+const EMPRESA_MODULES = [
+  { label: 'Datos Generales y Ubi', path: 'datos-ubi' },
+  { label: 'Serie y Correlativos', path: 'series-co' },
+  { label: 'Sucursales', path: 'sucursales' },
+  { label: 'Roles y Permisos', path: 'roles-per' },
+  { label: 'Usuarios', path: 'usuarios' },
+  { label: 'Métodos de pago', path: 'metodos-pago' },
+  { label: 'Auditoría', path: 'auditoria', permission: 'auditoria' },
+];
+
+// Shared navigation for the seven company submodules; the existing forms stay intact.
+export const EmpresaLayout = () => {
+  const ds = useDS();
+  const { can } = usePermission();
+  return (
+    <div className={`flex flex-col flex-1 min-h-0 -m-6 ${ds.pageBg}`}>
+      <nav aria-label="Configuración de Empresa" className={`flex gap-2 px-6 md:px-10 py-3 border-b overflow-x-auto shrink-0 ${ds.headerBg}`}>
+        {EMPRESA_MODULES.filter(item => can(item.permission || 'empresa', 'VER')).map(item => (
+          <NavLink key={item.path} to={`/empresa/${item.path}`} className={({ isActive }) => `px-4 py-2 rounded-xl border text-xs font-semibold whitespace-nowrap transition-colors ${
+            isActive ? 'bg-yellow-500 border-yellow-500 text-black' : `${ds.cardBg} ${ds.muted} hover:opacity-80`
+          }`}>{item.label}</NavLink>
+        ))}
+      </nav>
+      <div className="flex flex-col flex-1 min-h-0 overflow-y-auto p-6"><Outlet /></div>
+    </div>
+  );
+};
 
 /* ─────────────────────────────────────────────────────────
    VALIDATORS

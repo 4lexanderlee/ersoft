@@ -16,6 +16,14 @@ import {
 } from 'chart.js';
 import { useTheme } from '../context/ThemeContext';
 import { useInventario } from '../context/InventarioContext';
+import { useFinanzas } from '../context/FinanzasContext';
+import { usePermission } from '../hooks/usePermission';
+import { useDS } from '../hooks/useDS';
+import { financialSummary, getBranches, inBranch, inPeriod, money, todayLima } from '../utils/businessData';
+import { FaSync } from 'react-icons/fa';
+import Card from '../components/ui/Card';
+import Badge from '../components/ui/Badge';
+import Input from '../components/ui/Input';
 
 Chart.register(
   BarController, BarElement,
@@ -57,7 +65,7 @@ const inRange = (fecha, desde, hasta) => {
   if (hs && d > hs) return false;
   return true;
 };
-const isoToday = () => new Date().toISOString().slice(0, 10);
+const isoToday = todayLima;
 const isoMinus = (days) => {
   const d = new Date(); d.setDate(d.getDate() - days);
   return d.toISOString().slice(0, 10);
@@ -101,7 +109,6 @@ const load = (key) => { try { return JSON.parse(localStorage.getItem(key) || '[]
 const calcVentasMensuales = (comp) => {
   const totales = new Array(12).fill(0);
   comp.filter(c => c.estado !== 'Anulado').forEach(c => { const d = toDate(c.fecha); if (d) totales[d.getMonth()] += c.total || 0; });
-  if (totales.every(v => v === 0)) return { labels: MESES, data: [3200,4100,3800,5200,4600,6100,5500,7200,6300,8100,7400,9200] };
   return { labels: MESES, data: totales };
 };
 
@@ -114,7 +121,6 @@ const calcCategorias = (comp) => {
     });
   });
   const entries = Object.entries(map).sort((a,b) => b[1]-a[1]);
-  if (!entries.length) return { labels: ['Costura','Tejido','Bordado','Diseño','Otros'], data: [4200, 3100, 2600, 1900, 800] };
   return { labels: entries.map(e => e[0]), data: entries.map(e => Math.round(e[1])) };
 };
 
@@ -123,7 +129,6 @@ const calcAnulados = (comp) => {
   comp.filter(c => c.estado === 'Anulado' || c.estado === 'anulado').forEach(c => {
     const d = toDate(c.fecha); if (d) counts[d.getMonth()]++;
   });
-  if (counts.every(v => v === 0)) return { labels: MESES, data: [1,0,2,1,3,0,1,2,0,1,2,1] };
   return { labels: MESES, data: counts };
 };
 
@@ -135,7 +140,6 @@ const calcTicketPromedio = (comp) => {
     if (d) { sums[d.getMonth()] += c.total || 0; cnts[d.getMonth()]++; }
   });
   const data = sums.map((s, i) => cnts[i] ? Math.round(s / cnts[i]) : 0);
-  if (data.every(v => v === 0)) return { labels: MESES, data: [480,510,430,560,590,620,550,680,640,710,695,760] };
   return { labels: MESES, data };
 };
 
@@ -146,7 +150,6 @@ const calcClientesNuevos = () => {
     const d = toDate(c.createdAt || c.fecha);
     if (d) counts[d.getMonth()]++;
   });
-  if (counts.every(v => v === 0)) return { labels: MESES, data: [5,8,6,11,9,14,12,17,13,19,16,22] };
   return { labels: MESES, data: counts };
 };
 
@@ -190,7 +193,7 @@ const getStockMuerto = (comp, productos) => {
 };
 
 // [#] FINANZAS Y CLIENTES
-const calcMargenUtilidad = (comp) => {
+const calcMargenUtilidad = (comp, expenses) => {
   const ingresos = new Array(12).fill(0);
   const costos = new Array(12).fill(0);
   
@@ -199,10 +202,9 @@ const calcMargenUtilidad = (comp) => {
     if (!d) return;
     const m = d.getMonth();
     
-    let ing = 0, cost = 0;
+    let ing = Number(c.total || 0) / 1.18, cost = 0;
     (c.items || []).forEach(it => {
       const q = it.qty || 1;
-      ing += q * (it.precio || 0);
       cost += q * (parseFloat(it.costo) || 0);
     });
     
@@ -210,9 +212,7 @@ const calcMargenUtilidad = (comp) => {
     costos[m] += cost;
   });
   
-  if (ingresos.every(v => v === 0)) {
-     return { labels: MESES, ingresos: [3200,4100,3800,5200,4600,6100,5500,7200,6300,8100,7400,9200], costos: [1500, 2000, 1900, 2200, 2600, 3100, 2500, 3200, 3300, 4100, 3400, 4200] };
-  }
+  expenses.forEach(r => { const month = new Date(`${(r.fecha_resolucion || r.fecha_solicitud).slice(0, 10)}T12:00:00`).getMonth(); costos[month] += r.tiene_credito_fiscal_igv ? r.monto / 1.18 : Number(r.monto); });
   
   const utilidad = ingresos.map((v, i) => v - costos[i]);
   return { labels: MESES, ingresos, costos, utilidad };
@@ -220,7 +220,7 @@ const calcMargenUtilidad = (comp) => {
 
 const calcMetodosPago = (comp) => {
   const map = {};
-  comp.filter(c => c.estado !== 'Anulado').forEach(c => {
+  comp.filter(c => c.estado !== 'Anulado' && c.condicion_pago !== 'CREDITO' && c.metodoPago !== 'credit').forEach(c => {
     const m = c.metodoPago || 'cash';
     map[m] = (map[m] || 0) + (c.total || 0);
   });
@@ -278,7 +278,17 @@ const TABS = ['Resumen General', 'Inventario y Ventas', 'Finanzas y Clientes'];
 // ════════════════════════════════════════════════════════════════
 const Graficos = () => {
   const { theme } = useTheme();
-  const { productos } = useInventario();
+  const ds = useDS();
+  const { isGlobalScope, effectiveSucursalId } = usePermission();
+  const { productos: allProducts, lotes, almacenes } = useInventario();
+  const { ventas, cuentasCobrarPagar, rendicionesGastos, balancesIniciales, refreshFinanzas } = useFinanzas();
+  const [branchFilter, setBranchFilter] = useState('TODOS');
+  const branchId = isGlobalScope ? branchFilter === 'TODOS' ? null : branchFilter : effectiveSucursalId ?? undefined;
+  const productos = useMemo(() => allProducts.filter(p => {
+    const lot = lotes.find(l => String(l.id) === String(p.loteId));
+    const warehouse = almacenes.find(a => String(a.id) === String(lot?.almacenId));
+    return inBranch({ sucursal_id: warehouse?.sucursalId }, branchId);
+  }), [allProducts, lotes, almacenes, branchId]);
   const isDark = theme === 'dark';
 
   const [activeTab, setActiveTab] = useState(0);
@@ -310,8 +320,10 @@ const Graficos = () => {
   const destroy = (ref) => { if (ref.chart.current) { ref.chart.current.destroy(); ref.chart.current = null; } };
   const destroyAll = () => Object.values(refs).forEach(destroy);
 
-  const allComp = useMemo(() => load('ersoft_comprobantes'), []);
+  const allComp = useMemo(() => ventas.filter(v => inBranch(v, branchId)), [ventas, branchId]);
   const comp    = useMemo(() => filterComp(allComp, desde, hasta), [allComp, desde, hasta]);
+  const approvedExpenses = useMemo(() => rendicionesGastos.filter(r => r.estado === 'APROBADO' && inBranch(r, branchId) && inPeriod(r.fecha_resolucion || r.fecha_solicitud, desde, hasta)), [rendicionesGastos, branchId, desde, hasta]);
+  const financial = financialSummary({ ventas: allComp, cuentas: cuentasCobrarPagar.filter(c => inBranch(c, branchId)), rendiciones: rendicionesGastos.filter(r => inBranch(r, branchId)), balances: balancesIniciales.filter(b => inBranch(b, branchId)), desde, hasta });
 
   const kpis = useMemo(() => {
     const nVentas  = comp.filter(c => c.estado !== 'Anulado');
@@ -362,7 +374,6 @@ const Graficos = () => {
       if (refs.donut.canvas.current) {
         let ok = 0, warn = 0, crit = 0;
         productos.forEach(p => { const s = p.stock ?? 0; if (s <= 0) crit++; else if (s <= 5) warn++; else ok++; });
-        if (!ok && !warn && !crit) { ok = 18; warn = 7; crit = 3; }
         refs.donut.chart.current = new Chart(refs.donut.canvas.current, {
           type: 'doughnut',
           data: { labels: ['Stock OK','Reordenar','Sin Stock'], datasets: [{ data: [ok, warn, crit], backgroundColor: [P.green, P.amber, P.coralS], borderColor: isDark ? '#1e293b' : '#fff', borderWidth: 3 }] },
@@ -418,15 +429,15 @@ const Graficos = () => {
     // ── Finanzas y Clientes ──
     if (activeTab === 2) {
       if (refs.margen.canvas.current) {
-        const mg = calcMargenUtilidad(comp);
+        const mg = calcMargenUtilidad(comp, approvedExpenses);
         refs.margen.chart.current = new Chart(refs.margen.canvas.current, {
           type: 'line',
           data: {
             labels: mg.labels,
             datasets: [
               { label: 'Utilidad Real (Neta)', data: mg.utilidad, borderColor: P.green, backgroundColor: 'rgba(34,197,94,0.1)', fill: true, tension: 0.3, pointRadius: 3, borderWidth: 2 },
-              { label: 'Ingresos Brutos', data: mg.ingresos, borderColor: P.blue, borderDash: [5,5], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 },
-              { label: 'Costos Acumulados', data: mg.costos, borderColor: P.coral, borderDash: [5,5], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+              { label: 'Ventas sin IGV', data: mg.ingresos, borderColor: P.blue, borderDash: [5,5], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 },
+              { label: 'Costos y gastos aprobados', data: mg.costos, borderColor: P.coral, borderDash: [5,5], fill: false, tension: 0.3, pointRadius: 0, borderWidth: 2 },
             ]
           },
           options: { ...opts, plugins: { ...opts.plugins, tooltip: { ...opts.plugins.tooltip, callbacks: { label: ctx => ` ${ctx.dataset.label}: ${fmt.format(ctx.raw)}` } } }, scales: { x: opts.scales.x, y: { ...opts.scales.y, ticks: { ...opts.scales.y.ticks, callback: fmtS } } } },
@@ -451,7 +462,7 @@ const Graficos = () => {
     }
 
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isDark, comp, productos, activeTab]);
+  }, [isDark, comp, productos, activeTab, approvedExpenses]);
 
   useEffect(() => {
     drawCharts();
@@ -469,14 +480,39 @@ const Graficos = () => {
     <div className={`flex flex-col gap-4 min-h-full -m-6 p-6 ${pageBg}`}>
 
       {/* ── Encabezado ── */}
-      <div className="flex items-start justify-between flex-wrap gap-2">
+      <div className="flex items-start justify-between flex-wrap gap-3">
         <div>
           <h1 className={`text-2xl font-extrabold tracking-tight ${isDark ? 'text-white' : 'text-gray-900'}`}>
             Panel de Estadísticas Avanzadas
           </h1>
           <p className={`text-xs mt-0.5 ${isDark ? 'text-gray-400' : 'text-gray-500'}`}>
-            Datos en tiempo real · filtra por rango de fechas
+            Datos en tiempo real · filtra por sede y rango de fechas
           </p>
+        </div>
+        <div className="flex items-center gap-2 w-full sm:w-auto">
+          <div className="w-full sm:w-64">
+            <Input
+              as="select"
+              size="sm"
+              aria-label="Sucursal de reportes"
+              value={isGlobalScope ? branchFilter : String(effectiveSucursalId ?? '')}
+              disabled={!isGlobalScope}
+              onChange={e => setBranchFilter(e.target.value)}
+            >
+              {isGlobalScope && <option value="TODOS">Todas las Sucursales (Global)</option>}
+              {getBranches().filter(b => isGlobalScope || String(b.id) === String(effectiveSucursalId)).map(b => (
+                <option key={b.id} value={b.id}>{b.nombre || b.nombreComercial}</option>
+              ))}
+            </Input>
+          </div>
+          <button
+            type="button"
+            onClick={refreshFinanzas}
+            title="Sincronizar comprobantes y finanzas"
+            className={`p-2 rounded-xl border transition-colors shrink-0 ${isDark ? 'border-gray-600 text-gray-300 hover:bg-gray-700 hover:text-white' : 'border-gray-300 text-gray-600 hover:bg-gray-100'}`}
+          >
+            <FaSync size={13} />
+          </button>
         </div>
       </div>
 
@@ -518,7 +554,7 @@ const Graficos = () => {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 mt-2">
         <KPI label="Total Vendido"   value={fmt.format(kpis.total)}  accent="text-teal-500"  isDark={isDark} />
         {activeTab === 2 ? (
-          <KPI label="Ganancia Neta" value={fmt.format(kpis.total - kpis.totalCostos)} accent="text-green-500" isDark={isDark} />
+          <KPI label="Ganancia Neta" value={money(financial.profit)} accent="text-green-500" isDark={isDark} />
         ) : (
           <KPI label="Ticket Promedio" value={fmt.format(kpis.avg)} accent="text-indigo-400" isDark={isDark} />
         )}
@@ -532,6 +568,83 @@ const Graficos = () => {
         <KPI label="Stock Crítico"   value={`${kpis.stockC} prod.`}   accent="text-red-500"   isDark={isDark} />
         <KPI label="A Reordenar"     value={`${kpis.stockW} prod.`}   accent="text-amber-400" isDark={isDark} />
       </div>
+
+      {/* ── Desglose Financiero y Tributario RF-12 (RN-01, RN-02, RN-03, RN-04) ── */}
+      {(activeTab === 0 || activeTab === 2) && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          {[
+            {
+              title: 'Estado de Resultados (P&G Devengado)',
+              badge: 'RN-03 Devengo',
+              badgeColor: 'blue',
+              accent: financial.profit >= 0 ? 'text-emerald-500' : 'text-red-500',
+              rows: [
+                ['Ventas sin IGV (Total / 1.18)', financial.netSales],
+                ['(-) Costo de ventas', -financial.cost],
+                ['(-) Rendiciones aprobadas (neto)', -financial.expenses],
+                ['Utilidad neta devengada', financial.profit],
+              ],
+            },
+            {
+              title: 'Flujo de Caja Líquido',
+              badge: 'RN-04 Liquidez',
+              badgeColor: 'emerald',
+              accent: financial.liquidity >= 0 ? 'text-teal-500' : 'text-red-500',
+              rows: [
+                ['Ventas cobradas al contado', financial.cashSales],
+                ['Efectivo físico en caja', financial.cashOnly],
+                ['(+) Cobros de CxC', financial.collected],
+                ['(-) Pagos de CxP', -financial.paid],
+                ['Flujo líquido del período', financial.liquidity],
+              ],
+            },
+            {
+              title: 'Liquidación IGV 18% SUNAT',
+              badge: 'RN-02 Pasivo',
+              badgeColor: 'amber',
+              accent: financial.taxDue <= 0 ? 'text-emerald-500' : 'text-amber-500',
+              rows: [
+                ['IGV Débito (Ventas)', financial.salesTax],
+                ['(-) Crédito fiscal gastos/compras', -financial.taxCredit],
+                [financial.taxDue < 0 ? 'Saldo fiscal a favor' : 'IGV neto por pagar SUNAT', Math.abs(financial.taxDue)],
+              ],
+            },
+            {
+              title: 'Balance Inicial · Patrimonio',
+              badge: 'RN-01 No es Venta',
+              badgeColor: 'purple',
+              accent: 'text-purple-400',
+              rows: [
+                ['Capital inicial en Caja', financial.openingCash],
+                ['Capital en Bancos', financial.openingBank],
+                ['Inventario de apertura', financial.openingInventory],
+                ['Patrimonio base separado', financial.openingCash + financial.openingBank + financial.openingInventory],
+              ],
+            },
+          ].map((block) => (
+            <Card key={block.title} padding="p-4" className={`flex flex-col justify-between ${ds.text}`}>
+              <div className="flex items-start justify-between gap-2 mb-3">
+                <h2 className="text-xs font-extrabold uppercase tracking-wider leading-snug">{block.title}</h2>
+                <Badge color={block.badgeColor}>{block.badge}</Badge>
+              </div>
+              <dl className="space-y-1.5 text-xs">
+                {block.rows.map(([label, value], i) => {
+                  const isTotal = i === block.rows.length - 1;
+                  return (
+                    <div
+                      key={label}
+                      className={`flex justify-between gap-3 ${isTotal ? `border-t pt-2.5 mt-2 font-extrabold text-sm ${ds.divider}` : ds.muted}`}
+                    >
+                      <dt>{label}</dt>
+                      <dd className={`whitespace-nowrap ${isTotal ? block.accent : ds.text}`}>{money(value)}</dd>
+                    </div>
+                  );
+                })}
+              </dl>
+            </Card>
+          ))}
+        </div>
+      )}
 
       {/* ── Vistas por Tab ── */}
       
@@ -587,7 +700,7 @@ const Graficos = () => {
       {activeTab === 2 && (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 flex-1">
           <div className="xl:col-span-2">
-            <ChartCard title="Análisis de Margen de Utilidad (Ganancia Real)" subtitle="Ingresos Brutos vs Costos Acumulados = Utilidad Neta Mensual" isDark={isDark}>
+            <ChartCard title="Análisis de Margen de Utilidad (Ganancia Real)" subtitle="Ventas sin IGV menos costo de ventas y gastos aprobados" isDark={isDark}>
                <canvas ref={refs.margen.canvas} />
             </ChartCard>
           </div>
