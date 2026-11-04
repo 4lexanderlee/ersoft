@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { FaMoneyBillWave } from 'react-icons/fa';
+import React, { useMemo, useState, useEffect } from 'react';
+import { FaMoneyBillWave, FaPlus } from 'react-icons/fa';
 import { useDS } from '../../hooks/useDS';
 import { useAuth } from '../../context/AuthContext';
 import { useFinanzas } from '../../context/FinanzasContext';
@@ -9,6 +9,7 @@ import Btn from '../ui/Btn';
 import Badge from '../ui/Badge';
 import Input from '../ui/Input';
 import EmptyState from '../ui/EmptyState';
+import NuevaCxPModal from './NuevaCxPModal';
 import {
   MODULO_RBAC, loadSucursales, formatPEN, estadoEfectivo, ESTADO_CUENTA_COLOR,
   sucursalNombre, selectCls,
@@ -93,9 +94,15 @@ const CuentasPanel = ({ tipo }) => {
   const [estadoFiltro, setEstadoFiltro] = useState('TODOS');
   const [sucursalFiltro, setSucursalFiltro] = useState(effectiveSucursalId ? String(effectiveSucursalId) : 'TODAS');
   const [abonoCuenta, setAbonoCuenta] = useState(null);
+  const [showNuevaCxP, setShowNuevaCxP] = useState(false);
   const [aviso, setAviso] = useState('');
 
+  // Paginación a 25 registros
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+
   const canAbonar = can(MODULO_RBAC, 'EDITAR');
+  const canCrearCxP = !esCobro && (can('cuentas_por_pagar_crear', 'CREAR') || can(MODULO_RBAC, 'CREAR'));
 
   const filas = useMemo(() => cuentasCobrarPagar
     .filter((c) => c.tipo === tipo)
@@ -104,6 +111,14 @@ const CuentasPanel = ({ tipo }) => {
     .filter((c) => sucursalFiltro === 'TODAS' || String(c.sucursal_id) === sucursalFiltro)
     .sort((a, b) => String(a.fecha_vencimiento).localeCompare(String(b.fecha_vencimiento))),
   [cuentasCobrarPagar, tipo, estadoFiltro, sucursalFiltro]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [estadoFiltro, sucursalFiltro, tipo]);
+
+  const totalPages = Math.max(1, Math.ceil(filas.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedFilas = filas.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const totalSaldo = filas.filter((c) => c.estadoUI !== 'PAGADO').reduce((s, c) => s + c.saldo_pendiente, 0);
 
@@ -122,38 +137,51 @@ const CuentasPanel = ({ tipo }) => {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Filtros */}
-      <div className="flex flex-wrap items-end gap-3">
-        <div className="flex flex-col gap-1">
-          <span className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Estado</span>
-          <div className="flex gap-1.5 flex-wrap">
-            {ESTADOS.map((e) => (
-              <button
-                key={e} type="button" onClick={() => setEstadoFiltro(e)}
-                className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
-                  estadoFiltro === e
-                    ? 'bg-yellow-500 border-yellow-500 text-black'
-                    : `${ds.cardBg} ${ds.muted} hover:border-yellow-500/50`
-                }`}
-              >
-                {e === 'TODOS' ? 'Todos' : e}
-              </button>
-            ))}
+      {/* Barra superior: Filtros y Botón Nueva CxP */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div className="flex flex-wrap items-end gap-3">
+          <div className="flex flex-col gap-1">
+            <span className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Estado</span>
+            <div className="flex gap-1.5 flex-wrap">
+              {ESTADOS.map((e) => (
+                <button
+                  key={e} type="button" onClick={() => setEstadoFiltro(e)}
+                  className={`px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors ${
+                    estadoFiltro === e
+                      ? 'bg-yellow-500 border-yellow-500 text-black'
+                      : `${ds.cardBg} ${ds.muted} hover:border-yellow-500/50`
+                  }`}
+                >
+                  {e === 'TODOS' ? 'Todos' : e}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex flex-col gap-1 min-w-[180px]">
+            <span className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Sucursal</span>
+            <select
+              value={sucursalFiltro} onChange={(e) => setSucursalFiltro(e.target.value)}
+              disabled={Boolean(effectiveSucursalId)} className={`${selectCls(ds)} !py-1.5`}
+            >
+              <option value="TODAS">Todas las sucursales</option>
+              {sucursales.map((s) => <option key={s.id} value={String(s.id)}>{s.nombre}</option>)}
+            </select>
           </div>
         </div>
-        <div className="flex flex-col gap-1 min-w-[180px]">
-          <span className={`text-xs font-semibold uppercase tracking-wider ${ds.muted}`}>Sucursal</span>
-          <select
-            value={sucursalFiltro} onChange={(e) => setSucursalFiltro(e.target.value)}
-            disabled={Boolean(effectiveSucursalId)} className={`${selectCls(ds)} !py-1.5`}
-          >
-            <option value="TODAS">Todas las sucursales</option>
-            {sucursales.map((s) => <option key={s.id} value={String(s.id)}>{s.nombre}</option>)}
-          </select>
-        </div>
-        <div className={`ml-auto text-sm ${ds.muted}`}>
-          Saldo {esCobro ? 'por cobrar' : 'por pagar'}:{' '}
-          <strong className={ds.text}>{formatPEN(totalSaldo)}</strong>
+
+        <div className="flex items-center gap-4 ml-auto">
+          <div className={`text-sm ${ds.muted}`}>
+            Saldo {esCobro ? 'por cobrar' : 'por pagar'}:{' '}
+            <strong className={ds.text}>{formatPEN(totalSaldo)}</strong>
+          </div>
+          {canCrearCxP && (
+            <Btn
+              leftIcon={<FaPlus size={11} />}
+              onClick={() => { setAviso(''); setShowNuevaCxP(true); }}
+            >
+              + Nueva Cuenta por Pagar (Proveedor)
+            </Btn>
+          )}
         </div>
       </div>
 
@@ -184,7 +212,7 @@ const CuentasPanel = ({ tipo }) => {
               </tr>
             </thead>
             <tbody>
-              {filas.map((c) => (
+              {pagedFilas.map((c) => (
                 <tr key={c.id} className={`border-b last:border-0 ${ds.divider}`}>
                   <td className={td}>
                     <p className="font-semibold">{c.cliente_proveedor_nombre}</p>
@@ -212,12 +240,52 @@ const CuentasPanel = ({ tipo }) => {
             </tbody>
           </table>
         )}
+
+        {/* Barra de Paginación a 25 registros */}
+        {filas.length > 0 && (
+          <div className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t ${ds.divider} ${ds.cardBg}`}>
+            <span className={`text-xs font-semibold ${ds.muted}`}>
+              Mostrando {(safePage - 1) * PAGE_SIZE + 1} - {Math.min(safePage * PAGE_SIZE, filas.length)} de {filas.length} registros
+            </span>
+            <div className="flex items-center gap-2">
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Btn>
+              <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${ds.cardFlat} ${ds.text}`}>
+                Página {safePage} de {totalPages}
+              </span>
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              >
+                Siguiente
+              </Btn>
+            </div>
+          </div>
+        )}
       </Card>
 
       {abonoCuenta && (
         <AbonoModal
           cuenta={abonoCuenta} esCobro={esCobro}
           onClose={() => setAbonoCuenta(null)} onConfirm={handleConfirm}
+        />
+      )}
+
+      {showNuevaCxP && (
+        <NuevaCxPModal
+          isOpen={showNuevaCxP}
+          onClose={() => setShowNuevaCxP(false)}
+          onSuccess={(creada) => {
+            setAviso(`Cuenta por pagar de ${creada?.cliente_proveedor_nombre} registrada exitosamente y programada en el calendario.`);
+          }}
         />
       )}
     </div>

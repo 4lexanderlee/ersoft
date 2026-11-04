@@ -148,6 +148,8 @@ const TBF = () => {
   const [estadoFilter, setEstadoFilter] = useState('Todos');
   const [pagoFilter,   setPagoFilter]   = useState('Todos');
   const [applied,      setApplied]      = useState({});
+  const [currentPage,  setCurrentPage]  = useState(1);
+  const PAGE_SIZE = 25;
   const [anulTarget,   setAnulTarget]   = useState(null);
   const [anulPwd,      setAnulPwd]      = useState('');
   const [anulError,    setAnulError]    = useState('');
@@ -196,8 +198,14 @@ const TBF = () => {
 
   const totalFiltrado = filtered.filter(c => c.estado === 'Activo').reduce((s, c) => s + (c.total || 0), 0);
 
-  const handleApply = () =>
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const paginatedComprobantes = filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+
+  const handleApply = () => {
     setApplied({ tipo: tipoFilter, id: idFilter, doc: docFilter, estado: estadoFilter, desde: fechaDesde, hasta: fechaHasta, pago: pagoFilter });
+    setCurrentPage(1);
+  };
 
   const handleVer = (record) => {
     const html = buildTicketHTMLFromRecord(record);
@@ -377,7 +385,7 @@ const TBF = () => {
               title="Sin comprobantes"
               message="No hay comprobantes que coincidan con los filtros seleccionados."
             />
-          ) : filtered.map(record => {
+          ) : paginatedComprobantes.map(record => {
             const anulado = record.estado === 'Anulado';
             const isSelected = selectedIds.includes(record.id);
             const clientName = record.cliente
@@ -438,6 +446,36 @@ const TBF = () => {
             );
           })}
         </div>
+
+        {/* ── Paginación (25 registros por página) ── */}
+        {filtered.length > 0 && (
+          <div className={`flex flex-wrap items-center justify-between gap-3 px-4 py-3 rounded-2xl border ${ds.cardBg} shrink-0`}>
+            <span className={`text-xs font-semibold ${ds.muted}`}>
+              Mostrando {(safePage - 1) * PAGE_SIZE + 1} - {Math.min(safePage * PAGE_SIZE, filtered.length)} de {filtered.length} comprobantes
+            </span>
+            <div className="flex items-center gap-2">
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Btn>
+              <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${ds.cardFlat} ${ds.text}`}>
+                Página {safePage} de {totalPages}
+              </span>
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              >
+                Siguiente
+              </Btn>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ── Footer ── */}

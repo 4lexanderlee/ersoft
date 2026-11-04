@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { FaPlus, FaReceipt } from 'react-icons/fa';
 import { useDS } from '../../hooks/useDS';
 import { useAuth } from '../../context/AuthContext';
@@ -31,6 +31,10 @@ const RendicionesGastoPanel = () => {
   const [motivo, setMotivo] = useState('');
   const [motivoError, setMotivoError] = useState('');
 
+  // Paginación a 25 registros
+  const PAGE_SIZE = 25;
+  const [currentPage, setCurrentPage] = useState(1);
+
   const canCrear = can(MODULO_RBAC, 'CREAR');
   const canAprobar = can(MODULO_RBAC, 'APROBAR_RENDICION');
 
@@ -39,6 +43,14 @@ const RendicionesGastoPanel = () => {
     .filter((r) => estadoFiltro === 'TODOS' || r.estado === estadoFiltro)
     .sort((a, b) => String(b.fecha_solicitud).localeCompare(String(a.fecha_solicitud))),
   [rendicionesGastos, estadoFiltro, effectiveSucursalId]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [estadoFiltro, effectiveSucursalId]);
+
+  const totalPages = Math.max(1, Math.ceil(filas.length / PAGE_SIZE));
+  const safePage = Math.min(currentPage, totalPages);
+  const pagedFilas = filas.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   const aprobar = (r) => {
     if (!canAprobar) return;
@@ -88,7 +100,7 @@ const RendicionesGastoPanel = () => {
               </tr>
             </thead>
             <tbody>
-              {filas.map((r) => (
+              {pagedFilas.map((r) => (
                 <tr key={r.id} className={`border-b last:border-0 ${ds.divider}`}>
                   <td className={td}>{labelCategoria(r.categoria)}</td>
                   <td className={td}>
@@ -120,6 +132,36 @@ const RendicionesGastoPanel = () => {
               ))}
             </tbody>
           </table>
+        )}
+
+        {/* Barra de Paginación a 25 registros */}
+        {filas.length > 0 && (
+          <div className={`flex flex-wrap items-center justify-between gap-3 px-5 py-3 border-t ${ds.divider} ${ds.cardBg}`}>
+            <span className={`text-xs font-semibold ${ds.muted}`}>
+              Mostrando {(safePage - 1) * PAGE_SIZE + 1} - {Math.min(safePage * PAGE_SIZE, filas.length)} de {filas.length} rendiciones
+            </span>
+            <div className="flex items-center gap-2">
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage <= 1}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+              >
+                Anterior
+              </Btn>
+              <span className={`text-xs font-bold px-3 py-1.5 rounded-xl border ${ds.cardFlat} ${ds.text}`}>
+                Página {safePage} de {totalPages}
+              </span>
+              <Btn
+                variant="secondary"
+                size="sm"
+                disabled={safePage >= totalPages}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+              >
+                Siguiente
+              </Btn>
+            </div>
+          </div>
         )}
       </Card>
 

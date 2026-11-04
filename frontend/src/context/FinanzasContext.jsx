@@ -31,6 +31,61 @@ const save = (key, val) => {
   }
 };
 
+// ── Seguridad de Terminal y Detección de Dispositivo / IP (R7) ─────────────────
+const FINGERPRINT_STORAGE_KEY = 'ersoft_terminal_fingerprint';
+const SIMULATION_STORAGE_KEY = 'ersoft_terminal_simular_otro';
+
+export const getTerminalFingerprint = () => {
+  try {
+    const stored = localStorage.getItem(FINGERPRINT_STORAGE_KEY);
+    if (stored) {
+      const parsed = JSON.parse(stored);
+      if (parsed && parsed.terminal_id) return parsed;
+    }
+  } catch (e) {
+    console.error('Error cargando terminal fingerprint:', e);
+  }
+
+  const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
+  let browser = 'Chrome';
+  if (ua.includes('Firefox')) browser = 'Firefox';
+  else if (ua.includes('Safari') && !ua.includes('Chrome')) browser = 'Safari';
+  else if (ua.includes('Edg')) browser = 'Edge';
+
+  let os = 'Linux';
+  if (ua.includes('Windows')) os = 'Windows';
+  else if (ua.includes('Macintosh') || ua.includes('Mac OS')) os = 'macOS';
+  else if (ua.includes('Android')) os = 'Android';
+  else if (ua.includes('iPhone') || ua.includes('iPad')) os = 'iOS';
+
+  const navegador_so = `${browser} / ${os}`;
+  // Fallback simulado 192.168.1.XX
+  const octet = Math.floor(Math.random() * 80) + 100;
+  const ip_detectada = `192.168.1.${octet}`;
+  const randPart = Math.random().toString(36).substring(2, 7).toUpperCase();
+  const terminal_id = `TERM-${randPart}`;
+
+  const fp = {
+    terminal_id,
+    ip_detectada,
+    navegador_so,
+    fecha_creacion: new Date().toISOString()
+  };
+  try {
+    localStorage.setItem(FINGERPRINT_STORAGE_KEY, JSON.stringify(fp));
+  } catch (e) {
+    console.error('Error guardando terminal fingerprint:', e);
+  }
+  return fp;
+};
+
+const SIMULATED_REMOTE_DEVICE = {
+  terminal_id: 'TERM-REMOTE-99',
+  ip_detectada: '192.168.1.99',
+  navegador_so: 'Safari / macOS (Terminal Remoto Simulado)',
+  es_simulado: true
+};
+
 // ── Datos Iniciales Simulados: Balances Iniciales (RN-01) ──────────────────────
 // Balance Inicial / Patrimonio NUNCA se registra como venta operativa.
 const DEFAULT_BALANCES_INICIALES = [
@@ -281,6 +336,108 @@ export const FinanzasProvider = ({ children }) => {
     window.addEventListener('storage', sync);
     return () => { window.removeEventListener('focus', sync); window.removeEventListener('storage', sync); };
   }, []);
+
+  // ── 0. Seguridad de Terminal y Detección de Dispositivo / IP (R7) ──
+  const [realTerminal] = useState(() => getTerminalFingerprint());
+  const [simularOtroDispositivo, setSimularOtroDispositivoState] = useState(() =>
+    load(SIMULATION_STORAGE_KEY, false)
+  );
+  const [cajaSesiones, setCajaSesiones] = useState(() => load('ersoft_caja_sesiones', []));
+
+  useEffect(() => {
+    const syncCaja = () => setCajaSesiones(load('ersoft_caja_sesiones', []));
+    window.addEventListener('focus', syncCaja);
+    window.addEventListener('storage', syncCaja);
+    return () => {
+      window.removeEventListener('focus', syncCaja);
+      window.removeEventListener('storage', syncCaja);
+    };
+  }, []);
+
+  const setSimularOtroDispositivo = (val) => {
+    setSimularOtroDispositivoState(val);
+    save(SIMULATION_STORAGE_KEY, val);
+  };
+
+  const activeTerminal = simularOtroDispositivo ? SIMULATED_REMOTE_DEVICE : realTerminal;
+
+  // Sucursal activa del usuario autenticado
+  const getActiveBranchId = () => {
+    try {
+      const raw = sessionStorage.getItem('ersoft_user') || localStorage.getItem('ersoft_user');
+      if (raw) {
+        const u = JSON.parse(raw);
+        return String(u.sucursal_id ?? u.sucursalId ?? '1');
+      }
+    } catch (_) {}
+    return '1';
+  };
+
+  const currentBranchId = getActiveBranchId();
+
+  // Sesión activa en la sucursal actual (o sesión abierta general)
+  const activeBranchCajaSesion = cajaSesiones.find(s =>
+    (s.estado === 'Abierto' || s.estado === 'ABIERTA') &&
+    String(s.sucursalId || s.sucursal_id || '1') === String(currentBranchId)
+  ) || cajaSesiones.find(s => s.estado === 'Abierto' || s.estado === 'ABIERTA') || null;
+
+  // ¿Terminal bloqueada para la caja activa?
+  // Si hay una caja abierta y su terminal_id no coincide con el activeTerminal actual
+  const isTerminalBlocked = Boolean(
+    activeBranchCajaSesion &&
+    activeBranchCajaSesion.terminal_id &&
+    activeBranchCajaSesion.terminal_id !== activeTerminal.terminal_id
+  );
+
+  // canOperatePOS: true únicamente si hay caja ABIERTA en la sucursal actual Y el terminal_id / IP coincide con el dispositivo activo
+  const canOperatePOS = Boolean(
+    activeBranchCajaSesion &&
+    (activeBranchCajaSesion.estado === 'Abierto' || activeBranchCajaSesion.estado === 'ABIERTA') &&
+    (!activeBranchCajaSesion.terminal_id || activeBranchCajaSesion.terminal_id === activeTerminal.terminal_id) &&
+    (!activeBranchCajaSesion.ip_detectada || activeBranchCajaSesion.ip_detectada === activeTerminal.ip_detectada || !simularOtroDispositivo) &&
+    !isTerminalBlocked
+  );
+
+  // Desbloqueo forzado por MASTER
+  const desbloquearTerminalMaster = (sessionId, masterUser) => {
+    const rawSessions = load('ersoft_caja_sesiones', []);
+    let prev = null;
+    let updated = null;
+
+    const next = rawSessions.map(s => {
+      if (s.id === sessionId || (!sessionId && (s.estado === 'Abierto' || s.estado === 'ABIERTA'))) {
+        prev = { ...s };
+        updated = {
+          ...s,
+          terminal_id: activeTerminal.terminal_id,
+          ip_detectada: activeTerminal.ip_detectada,
+          navegador_so: activeTerminal.navegador_so,
+          desbloqueado_por_master: true,
+          desbloqueado_fecha: new Date().toISOString(),
+          desbloqueado_por: masterUser?.name || 'Alexander Lee (Master)'
+        };
+        return updated;
+      }
+      return s;
+    });
+
+    save('ersoft_caja_sesiones', next);
+    setCajaSesiones(next);
+
+    logAuditAction({
+      usuario: masterUser?.name || 'Alexander Lee (Master)',
+      sucursalId: updated?.sucursalId || currentBranchId,
+      modulo: 'CAJA',
+      tipoAccion: 'EDITAR',
+      descripcion: `Desbloqueo forzado de terminal en sesión de caja ${sessionId || updated?.id} por MASTER. Terminal anterior: ${prev?.terminal_id || 'N/A'} -> Nueva terminal autorizada: ${activeTerminal.terminal_id}`,
+      datosPrevios: { terminal_id: prev?.terminal_id, ip_detectada: prev?.ip_detectada },
+      datosNuevos: { terminal_id: activeTerminal.terminal_id, ip_detectada: activeTerminal.ip_detectada },
+      ip: activeTerminal.ip_detectada
+    });
+
+    return updated;
+  };
+
   // ── 1. Balances Iniciales ──────────────────────────────────────────
   const [balancesIniciales, setBalancesIniciales] = useState(() =>
     load('ersoft_balances_iniciales', DEFAULT_BALANCES_INICIALES)
@@ -757,12 +914,24 @@ export const FinanzasProvider = ({ children }) => {
     setBalancesIniciales(load('ersoft_balances_iniciales', DEFAULT_BALANCES_INICIALES));
     setCuentasCobrarPagar(load('ersoft_cuentas_cobrar_pagar', DEFAULT_CUENTAS_COBRAR_PAGAR));
     setRendicionesGastos(load('ersoft_rendiciones_gastos', DEFAULT_RENDICIONES_GASTOS));
+    setCajaSesiones(load('ersoft_caja_sesiones', []));
   };
 
   return (
     <FinanzasContext.Provider
       value={{
         ventas, registrarVenta,
+        // Seguridad de Terminal y Caja (R7)
+        terminalInfo: activeTerminal,
+        realTerminalInfo: realTerminal,
+        simularOtroDispositivo,
+        setSimularOtroDispositivo,
+        canOperatePOS,
+        isTerminalBlocked,
+        activeBranchCajaSesion,
+        cajaSesiones,
+        desbloquearTerminalMaster,
+
         // Balances Iniciales
         balancesIniciales,
         addBalanceInicial,

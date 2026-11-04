@@ -16,7 +16,12 @@
         "tbf": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": true, "APROBAR_RENDICION": false },
         "inventario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": true, "ANULAR": true, "APROBAR_RENDICION": false },
         "empresa": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": true, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
-        "auditoria": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
+        "auditoria": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "familias_categorias": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": true, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cotizaciones_pos_crm": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cuentas_por_pagar_crear": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "desbloquear_terminal_caja": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "reprogramar_calendario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
       }
     },
     "ADMINISTRADOR": {
@@ -33,7 +38,12 @@
         "tbf": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": true, "APROBAR_RENDICION": false },
         "inventario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": true, "ANULAR": true, "APROBAR_RENDICION": false },
         "empresa": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
-        "auditoria": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
+        "auditoria": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "familias_categorias": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": true, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cotizaciones_pos_crm": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cuentas_por_pagar_crear": { "VER": true, "CREAR": true, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "desbloquear_terminal_caja": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "reprogramar_calendario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
       }
     },
     "CAJERO": {
@@ -50,7 +60,12 @@
         "tbf": { "VER": true, "CREAR": true, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
         "inventario": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
         "empresa": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
-        "auditoria": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
+        "auditoria": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "familias_categorias": { "VER": true, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cotizaciones_pos_crm": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cuentas_por_pagar_crear": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "desbloquear_terminal_caja": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "reprogramar_calendario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
       }
     },
     "ALMACENERO": {
@@ -67,7 +82,12 @@
         "tbf": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
         "inventario": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": false, "TRANSPASAR": true, "ANULAR": false, "APROBAR_RENDICION": false },
         "empresa": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
-        "auditoria": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
+        "auditoria": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "familias_categorias": { "VER": true, "CREAR": true, "EDITAR": true, "ELIMINAR": true, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cotizaciones_pos_crm": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "cuentas_por_pagar_crear": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "desbloquear_terminal_caja": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false },
+        "reprogramar_calendario": { "VER": false, "CREAR": false, "EDITAR": false, "ELIMINAR": false, "TRANSPASAR": false, "ANULAR": false, "APROBAR_RENDICION": false }
       }
     }
   },

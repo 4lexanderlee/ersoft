@@ -1,16 +1,19 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { FaPlus } from 'react-icons/fa';
 import { useDS } from '../hooks/useDS';
 import { useFinanzas } from '../context/FinanzasContext';
 import { usePermission } from '../hooks/usePermission';
 import PageHeader from '../components/ui/PageHeader';
 import RefreshButton from '../components/ui/RefreshButton';
+import Btn from '../components/ui/Btn';
 import Card from '../components/ui/Card';
 import EmptyState from '../components/ui/EmptyState';
 import CxCPanel from '../components/rendiciones/CxCPanel';
 import CxPPanel from '../components/rendiciones/CxPPanel';
 import RendicionesGastoPanel from '../components/rendiciones/RendicionesGastoPanel';
 import BalanceInicialCard from '../components/rendiciones/BalanceInicialCard';
+import NuevaCxPModal from '../components/rendiciones/NuevaCxPModal';
 import { MODULO_RBAC, formatPEN } from '../components/rendiciones/rendicionesUtils';
 
 const TABS = [
@@ -37,6 +40,9 @@ const Rendiciones = () => {
   const { can, effectiveSucursalId } = usePermission();
   const { calcularResumenFinanzas, rendicionesGastos, refreshFinanzas } = useFinanzas();
   const [activeTab, setActiveTab] = useState('cxc');
+  const [showNuevaCxPModal, setShowNuevaCxPModal] = useState(false);
+
+  const canCrearCxP = can('cuentas_por_pagar_crear', 'CREAR') || can(MODULO_RBAC, 'CREAR');
 
   if (!can(MODULO_RBAC, 'VER')) {
     return (
@@ -54,7 +60,19 @@ const Rendiciones = () => {
 
   return (
     <div className={`flex flex-col flex-1 -m-6 relative overflow-hidden ${ds.pageBg}`}>
-      <PageHeader onBack={() => navigate('/principal')} right={<RefreshButton onRefresh={refreshFinanzas} />} />
+      <PageHeader
+        onBack={() => navigate('/principal')}
+        right={
+          <div className="flex items-center gap-2">
+            {canCrearCxP && (
+              <Btn size="sm" leftIcon={<FaPlus size={10} />} onClick={() => setShowNuevaCxPModal(true)}>
+                + Nueva Cuenta por Pagar (Proveedor)
+              </Btn>
+            )}
+            <RefreshButton onRefresh={refreshFinanzas} />
+          </div>
+        }
+      />
 
       <div className="flex-1 overflow-y-auto">
         {/* KPIs */}
@@ -84,6 +102,14 @@ const Rendiciones = () => {
           {activeTab === 'balance' && <BalanceInicialCard />}
         </div>
       </div>
+
+      {showNuevaCxPModal && (
+        <NuevaCxPModal
+          isOpen={showNuevaCxPModal}
+          onClose={() => setShowNuevaCxPModal(false)}
+          onSuccess={() => refreshFinanzas()}
+        />
+      )}
     </div>
   );
 };

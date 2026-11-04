@@ -2,13 +2,16 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTheme } from '../context/ThemeContext';
 import { useAuth } from '../context/AuthContext';
+import { useFinanzas } from '../context/FinanzasContext';
 import { useDS } from '../hooks/useDS';
 import {
   FaLockOpen, FaLock, FaHistory, FaCalendarAlt, FaCashRegister,
   FaTimes, FaCoins, FaFilter, FaSync, FaChevronDown, FaStore, FaUser,
-  FaCheckCircle, FaTimesCircle, FaExclamationTriangle
+  FaCheckCircle, FaTimesCircle, FaExclamationTriangle,
+  FaShieldAlt, FaLaptop, FaNetworkWired, FaUnlock
 } from 'react-icons/fa';
 import PageHeader from '../components/ui/PageHeader';
+import { logAuditAction } from '../data/simulatedAudit';
 
 /* ─── helpers ─────────────────────────────────────────────────────────────── */
 const fmtDate = (iso) => {
@@ -80,6 +83,13 @@ const Caja = () => {
   const { theme } = useTheme();
   const ds = useDS();
   const { user } = useAuth();
+  const {
+    terminalInfo,
+    realTerminalInfo,
+    simularOtroDispositivo,
+    setSimularOtroDispositivo,
+    desbloquearTerminalMaster
+  } = useFinanzas();
   const navigate = useNavigate();
   const isDark = theme === 'dark';
 
@@ -94,6 +104,7 @@ const Caja = () => {
   const [montoCierre, setMontoCierre] = useState('');
   const [aperturaError, setAperturaError] = useState('');
   const [cierreError, setCierreError] = useState('');
+  const [unlockNotice, setUnlockNotice] = useState('');
 
   /* filters */
   const [filterSucursal, setFilterSucursal] = useState('Todos');
@@ -103,7 +114,15 @@ const Caja = () => {
   const [filterEstado, setFilterEstado] = useState('Todos');
 
   /* derived */
-  const isMasterOrAdmin = user?.role === 'Master' || user?.role === 'Administrador';
+  const isMasterOrAdmin = user?.role === 'Master' || user?.role === 'Administrador' || user?.rol === 'MASTER';
+  const isMaster = user?.role === 'Master' || user?.rol === 'MASTER';
+
+  // Detección de bloqueo de terminal: sesión activa abierta desde otro dispositivo
+  const isSessionBlocked = Boolean(
+    activeSession &&
+    activeSession.terminal_id &&
+    activeSession.terminal_id !== terminalInfo.terminal_id
+  );
 
   /* ── load reference data ─────────────────────────────────────── */
   useEffect(() => {
@@ -148,6 +167,10 @@ const Caja = () => {
         usuarioId: s.usuarioId != null ? String(s.usuarioId) : '?',
         usuarioNombre: s.usuarioNombre || 'Usuario',
         sucursalId: s.sucursalId != null ? String(s.sucursalId) : '1',
+        terminal_id: s.terminal_id || null,
+        ip_detectada: s.ip_detectada || null,
+        navegador_so: s.navegador_so || null,
+        desbloqueado_por_master: Boolean(s.desbloqueado_por_master),
         montoApertura: safeNum(s.montoApertura),
         efectivoVentas: safeNum(s.efectivoVentas),
         montoCierre: s.montoCierre != null ? safeNum(s.montoCierre) : null,
@@ -201,12 +224,26 @@ const Caja = () => {
         usuarioId: String(user.id),
         usuarioNombre: user.name || user.username || 'Usuario',
         sucursalId: String(user.sucursalId || '1'),
+        terminal_id: terminalInfo.terminal_id,
+        ip_detectada: terminalInfo.ip_detectada,
+        navegador_so: terminalInfo.navegador_so,
         montoApertura: val,
         efectivoVentas: 0,
         montoCierre: null,
         diferencia: null,
       };
       localStorage.setItem('ersoft_caja_sesiones', JSON.stringify([newSession, ...sessions]));
+
+      logAuditAction({
+        usuario: user.name || user.username || 'Usuario',
+        sucursalId: user.sucursalId || '1',
+        modulo: 'CAJA',
+        tipoAccion: 'CREAR',
+        descripcion: `Apertura de turno de Caja (${newSession.id}) con monto inicial S/ ${val.toFixed(2)} vinculada a terminal ${terminalInfo.terminal_id} (${terminalInfo.ip_detectada})`,
+        datosNuevos: newSession,
+        ip: terminalInfo.ip_detectada
+      });
+
       setMontoApertura('');
       setAperturaError('');
       loadCajaData();
@@ -218,6 +255,10 @@ const Caja = () => {
 
   const handleCerrarCaja = (e) => {
     e.preventDefault();
+    if (isSessionBlocked) {
+      setCierreError(`Terminal Bloqueada: Esta caja pertenece al terminal físico ${activeSession.terminal_id} (IP ${activeSession.ip_detectada}). Está prohibido cerrar el turno desde este dispositivo.`);
+      return;
+    }
     const val = parseFloat(montoCierre);
     if (isNaN(val) || val < 0) { setCierreError('Ingrese un monto de cierre válido.'); return; }
     if (!activeSession) return;
@@ -226,16 +267,50 @@ const Caja = () => {
       const esperado = safeNum(activeSession.montoApertura) + efectivoVentas;
       const updated = sessions.map(s =>
         s.id === activeSession.id
-          ? { ...s, estado: 'Cerrado', fechaCierre: new Date().toISOString(), efectivoVentas, montoCierre: val, diferencia: val - esperado }
+          ? {
+              ...s,
+              estado: 'Cerrado',
+              fechaCierre: new Date().toISOString(),
+              efectivoVentas,
+              montoCierre: val,
+              diferencia: val - esperado,
+              terminal_cierre_id: terminalInfo.terminal_id,
+              ip_cierre: terminalInfo.ip_detectada
+            }
           : s
       );
       localStorage.setItem('ersoft_caja_sesiones', JSON.stringify(updated));
+
+      logAuditAction({
+        usuario: user.name || user.username || 'Usuario',
+        sucursalId: user.sucursalId || '1',
+        modulo: 'CAJA',
+        tipoAccion: 'EDITAR',
+        descripcion: `Cierre y arqueo de Caja (${activeSession.id}) con monto físico S/ ${val.toFixed(2)} (esperado: S/ ${esperado.toFixed(2)}) desde terminal ${terminalInfo.terminal_id}`,
+        datosPrevios: { estado: 'Abierto', montoApertura: activeSession.montoApertura },
+        datosNuevos: { estado: 'Cerrado', montoCierre: val, diferencia: val - esperado },
+        ip: terminalInfo.ip_detectada
+      });
+
       setMontoCierre('');
       setCierreError('');
       loadCajaData();
     } catch (err) {
       console.error(err);
       setCierreError('Error al cerrar la caja.');
+    }
+  };
+
+  const handleMasterForceUnlock = () => {
+    if (!activeSession) return;
+    try {
+      desbloquearTerminalMaster(activeSession.id, user);
+      setUnlockNotice(`Terminal desbloqueada por MASTER. Se autorizó la sesión para ${terminalInfo.terminal_id} (${terminalInfo.ip_detectada}) y se auditó el evento.`);
+      setCierreError('');
+      loadCajaData();
+    } catch (err) {
+      console.error(err);
+      setCierreError('Error al ejecutar desbloqueo forzado de terminal.');
     }
   };
 
@@ -304,6 +379,144 @@ const Caja = () => {
       />
 
       <div className="flex flex-col gap-6 px-6 md:px-10 py-6 max-w-7xl mx-auto w-full pb-12">
+
+        {/* ── PANEL DE SEGURIDAD DE TERMINAL (RN-07) ──────────────── */}
+        <div className={`rounded-2xl border p-5 ${ds.cardBg} flex flex-col gap-4 shadow-sm`}>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-gray-200 dark:border-gray-700">
+            <div className="flex items-center gap-3">
+              <div className={`p-2.5 rounded-xl ${isSessionBlocked ? 'bg-red-500/10 text-red-400' : 'bg-emerald-500/10 text-emerald-400'}`}>
+                <FaShieldAlt size={18} />
+              </div>
+              <div>
+                <h3 className={`font-black text-sm uppercase tracking-wide ${text}`}>
+                  Seguridad de Terminal y Detección de Dispositivo / IP (RN-07)
+                </h3>
+                <p className={`text-xs ${subTx}`}>
+                  Huella digital de hardware, IP detectada y control de acceso exclusivo a caja
+                </p>
+              </div>
+            </div>
+
+            {/* Simulation Toggle */}
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => {
+                  setUnlockNotice('');
+                  setSimularOtroDispositivo(!simularOtroDispositivo);
+                }}
+                className={`px-3.5 py-2 rounded-xl text-xs font-bold transition-all border flex items-center gap-2 cursor-pointer ${
+                  simularOtroDispositivo
+                    ? 'bg-amber-500 text-black border-amber-400 shadow-md shadow-amber-500/20'
+                    : isDark
+                    ? 'bg-gray-800 text-gray-300 border-gray-700 hover:bg-gray-750'
+                    : 'bg-white text-gray-700 border-gray-300 hover:bg-gray-100'
+                }`}
+              >
+                <span className={`w-2 h-2 rounded-full ${simularOtroDispositivo ? 'bg-black animate-ping' : 'bg-gray-400'}`} />
+                Simular acceso desde otro dispositivo/IP
+              </button>
+            </div>
+          </div>
+
+          {/* Info Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+            <div className={`p-3 rounded-xl border flex flex-col gap-1 ${isDark ? 'bg-gray-800/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${subTx}`}>
+                <FaLaptop size={11} /> ID Terminal Activo
+              </span>
+              <span className={`font-mono text-sm font-black ${simularOtroDispositivo ? 'text-amber-400' : text}`}>
+                {terminalInfo.terminal_id}
+              </span>
+              <span className="text-[10px] text-gray-400">{terminalInfo.navegador_so}</span>
+            </div>
+
+            <div className={`p-3 rounded-xl border flex flex-col gap-1 ${isDark ? 'bg-gray-800/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider flex items-center gap-1.5 ${subTx}`}>
+                <FaNetworkWired size={11} /> IP Detectada
+              </span>
+              <span className={`font-mono text-sm font-black ${simularOtroDispositivo ? 'text-amber-400' : 'text-emerald-400'}`}>
+                {terminalInfo.ip_detectada}
+              </span>
+              <span className="text-[10px] text-gray-400">
+                {simularOtroDispositivo ? 'IP Remota Simulada' : 'Red Local / Ethernet'}
+              </span>
+            </div>
+
+            <div className={`p-3 rounded-xl border flex flex-col gap-1 ${isDark ? 'bg-gray-800/40 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${subTx}`}>
+                Terminal en Caja Abierta
+              </span>
+              <span className={`font-mono text-sm font-black ${text}`}>
+                {activeSession ? (activeSession.terminal_id || 'Sin vincular') : 'Ninguna caja abierta'}
+              </span>
+              <span className="text-[10px] text-gray-400">
+                {activeSession ? (activeSession.ip_detectada || 'IP local') : 'Esperando apertura'}
+              </span>
+            </div>
+
+            <div className={`p-3 rounded-xl border flex flex-col justify-between ${
+              !activeSession
+                ? isDark ? 'bg-gray-800/40 border-gray-700' : 'bg-gray-50 border-gray-200'
+                : isSessionBlocked
+                ? 'bg-red-500/10 border-red-500/30'
+                : 'bg-emerald-500/10 border-emerald-500/30'
+            }`}>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${
+                !activeSession ? subTx : isSessionBlocked ? 'text-red-400' : 'text-emerald-400'
+              }`}>
+                Estado de Terminal
+              </span>
+              <span className={`text-xs font-black uppercase ${
+                !activeSession ? subTx : isSessionBlocked ? 'text-red-400' : 'text-emerald-400'
+              }`}>
+                {!activeSession ? 'Sin turno activo' : isSessionBlocked ? 'Terminal Bloqueada' : 'Terminal Autorizada'}
+              </span>
+              <span className="text-[10px] text-gray-400">
+                {!activeSession
+                  ? 'Se vinculará a este terminal al abrir'
+                  : isSessionBlocked
+                  ? 'Operación/cierre denegado'
+                  : 'Acceso exclusivo concedido'}
+              </span>
+            </div>
+          </div>
+
+          {/* Banner si la terminal está bloqueada */}
+          {isSessionBlocked && (
+            <div className="p-4 rounded-xl bg-red-500/10 border border-red-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-pulse">
+              <div className="flex items-start gap-3">
+                <FaExclamationTriangle className="text-red-400 shrink-0 mt-0.5" size={18} />
+                <div>
+                  <p className="font-bold text-xs text-red-400 uppercase tracking-wide">
+                    Acceso Bloqueado: Dispositivo no Autorizado (RN-07)
+                  </p>
+                  <p className={`text-xs mt-0.5 ${text}`}>
+                    Esta caja fue aperturada desde la terminal <strong>{activeSession.terminal_id}</strong> (IP: {activeSession.ip_detectada}).
+                    Por integridad y seguridad, está estrictamente bloqueado operar o cerrar la caja desde un dispositivo diferente.
+                  </p>
+                </div>
+              </div>
+
+              {/* Botón de desbloqueo forzado exclusivo para MASTER */}
+              {isMaster && (
+                <button
+                  type="button"
+                  onClick={handleMasterForceUnlock}
+                  className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-500 text-white font-bold text-xs uppercase tracking-wider transition-colors shrink-0 flex items-center gap-1.5 shadow-md shadow-red-600/20 cursor-pointer"
+                >
+                  <FaUnlock size={11} /> Desbloqueo Forzado (Master)
+                </button>
+              )}
+            </div>
+          )}
+
+          {unlockNotice && (
+            <p className="text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2">
+              ✓ {unlockNotice}
+            </p>
+          )}
+        </div>
 
         {/* ── TOP ROW: Status + Form ─────────────────────────────── */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
@@ -445,9 +658,14 @@ const Caja = () => {
 
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-red-600 hover:bg-red-500 text-white font-black text-sm tracking-wide transition-all mt-1 active:scale-95"
+                  disabled={isSessionBlocked}
+                  className={`w-full py-3 rounded-xl font-black text-sm tracking-wide transition-all mt-1 ${
+                    isSessionBlocked
+                      ? 'bg-gray-600 text-gray-300 cursor-not-allowed opacity-60'
+                      : 'bg-red-600 hover:bg-red-500 text-white active:scale-95 cursor-pointer'
+                  }`}
                 >
-                  CERRAR TURNO Y CAJA
+                  {isSessionBlocked ? 'BLOQUEADO: TERMINAL NO AUTORIZADA' : 'CERRAR TURNO Y CAJA'}
                 </button>
               </form>
             )}
@@ -597,6 +815,7 @@ const Caja = () => {
                 <tr className={`border-b text-[10px] font-bold uppercase tracking-wider ${subTx} ${isDark ? 'bg-gray-800/50 border-gray-700' : 'bg-gray-50 border-gray-200'}`}>
                   <th className="px-5 py-3.5 w-32">ID Sesión</th>
                   <th className="px-5 py-3.5">Sucursal</th>
+                  <th className="px-5 py-3.5">Terminal / IP</th>
                   <th className="px-5 py-3.5">Cajero</th>
                   <th className="px-5 py-3.5">Apertura</th>
                   <th className="px-5 py-3.5">Cierre</th>
@@ -610,7 +829,7 @@ const Caja = () => {
               <tbody className={`divide-y ${isDark ? 'divide-gray-700/60' : 'divide-gray-100'}`}>
                 {filteredHistory.length === 0 ? (
                   <tr>
-                    <td colSpan={10} className="text-center py-16">
+                    <td colSpan={11} className="text-center py-16">
                       <div className="flex flex-col items-center gap-3">
                         <FaCoins size={28} className="opacity-20" />
                         <p className={`text-sm ${subTx} italic`}>
@@ -652,6 +871,18 @@ const Caja = () => {
                           <span className={`text-sm font-semibold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
                             {getBranchName(s.sucursalId)}
                           </span>
+                        </td>
+
+                        {/* Terminal / IP */}
+                        <td className="px-5 py-4">
+                          <div className="flex flex-col leading-tight">
+                            <span className={`font-mono text-xs font-bold ${isDark ? 'text-gray-300' : 'text-gray-700'}`}>
+                              {s.terminal_id || 'TERM-LOCAL'}
+                            </span>
+                            <span className="text-[10px] text-gray-400 font-mono mt-0.5">
+                              {s.ip_detectada || '192.168.1.100'}
+                            </span>
+                          </div>
                         </td>
 
                         {/* Cajero */}

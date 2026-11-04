@@ -9,6 +9,23 @@ import {
 import PageHeader from '../../components/ui/PageHeader';
 
 const DEFAULT_ROLES_PERMISOS = {
+  Master: {
+    ventas: { ver: true, crear: true, editar: true, eliminar: true },
+    inventario: { ver: true, crear: true, editar: true, eliminar: true },
+    lotes: { ver: true, crear: true, editar: true, eliminar: true },
+    tbf: { ver: true, crear: true, editar: true, eliminar: true },
+    graficos: { ver: true, crear: true, editar: true, eliminar: true },
+    empresa: { ver: true, crear: true, editar: true, eliminar: true },
+    promociones: { ver: true, crear: true, editar: true, eliminar: true },
+    caja: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_global: { ver: true, crear: true, editar: true, eliminar: true },
+    calendario_sucursal: { ver: true, crear: true, editar: true, eliminar: true },
+    familias_categorias: { ver: true, crear: true, editar: true, eliminar: true },
+    cotizaciones_pos_crm: { ver: true, crear: true, editar: true, eliminar: true },
+    cuentas_por_pagar_crear: { ver: true, crear: true, editar: true, eliminar: true },
+    desbloquear_terminal_caja: { ver: true, crear: true, editar: true, eliminar: true },
+    reprogramar_calendario: { ver: true, crear: true, editar: true, eliminar: true },
+  },
   Administrador: {
     ventas: { ver: true, crear: true, editar: true, eliminar: true },
     inventario: { ver: true, crear: true, editar: true, eliminar: true },
@@ -20,6 +37,11 @@ const DEFAULT_ROLES_PERMISOS = {
     caja: { ver: true, crear: true, editar: true, eliminar: true },
     calendario_global: { ver: true, crear: true, editar: true, eliminar: true },
     calendario_sucursal: { ver: true, crear: true, editar: true, eliminar: true },
+    familias_categorias: { ver: true, crear: true, editar: true, eliminar: true },
+    cotizaciones_pos_crm: { ver: true, crear: true, editar: true, eliminar: false },
+    cuentas_por_pagar_crear: { ver: true, crear: true, editar: false, eliminar: false },
+    desbloquear_terminal_caja: { ver: false, crear: false, editar: false, eliminar: false },
+    reprogramar_calendario: { ver: true, crear: true, editar: true, eliminar: false },
   },
   Vendedor: {
     ventas: { ver: true, crear: true, editar: false, eliminar: false },
@@ -32,6 +54,11 @@ const DEFAULT_ROLES_PERMISOS = {
     caja: { ver: true, crear: true, editar: true, eliminar: true },
     calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
     calendario_sucursal: { ver: true, crear: true, editar: true, eliminar: false },
+    familias_categorias: { ver: true, crear: false, editar: false, eliminar: false },
+    cotizaciones_pos_crm: { ver: true, crear: true, editar: true, eliminar: false },
+    cuentas_por_pagar_crear: { ver: false, crear: false, editar: false, eliminar: false },
+    desbloquear_terminal_caja: { ver: false, crear: false, editar: false, eliminar: false },
+    reprogramar_calendario: { ver: true, crear: true, editar: true, eliminar: false },
   },
   Cajero: {
     ventas: { ver: true, crear: true, editar: false, eliminar: false },
@@ -44,6 +71,11 @@ const DEFAULT_ROLES_PERMISOS = {
     caja: { ver: true, crear: true, editar: true, eliminar: true },
     calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
     calendario_sucursal: { ver: true, crear: false, editar: false, eliminar: false },
+    familias_categorias: { ver: true, crear: false, editar: false, eliminar: false },
+    cotizaciones_pos_crm: { ver: true, crear: true, editar: true, eliminar: false },
+    cuentas_por_pagar_crear: { ver: false, crear: false, editar: false, eliminar: false },
+    desbloquear_terminal_caja: { ver: false, crear: false, editar: false, eliminar: false },
+    reprogramar_calendario: { ver: true, crear: true, editar: true, eliminar: false },
   },
   Almacenero: {
     ventas: { ver: false, crear: false, editar: false, eliminar: false },
@@ -56,6 +88,11 @@ const DEFAULT_ROLES_PERMISOS = {
     caja: { ver: false, crear: false, editar: false, eliminar: false },
     calendario_global: { ver: true, crear: false, editar: false, eliminar: false },
     calendario_sucursal: { ver: true, crear: false, editar: false, eliminar: false },
+    familias_categorias: { ver: true, crear: true, editar: true, eliminar: true },
+    cotizaciones_pos_crm: { ver: false, crear: false, editar: false, eliminar: false },
+    cuentas_por_pagar_crear: { ver: false, crear: false, editar: false, eliminar: false },
+    desbloquear_terminal_caja: { ver: false, crear: false, editar: false, eliminar: false },
+    reprogramar_calendario: { ver: false, crear: false, editar: false, eliminar: false },
   },
 };
 
@@ -70,6 +107,11 @@ const MODULE_LABELS = {
   caja: 'Gestión de Caja / Turnos',
   calendario_global: '📅 Calendario Global (Eventos Empresa)',
   calendario_sucursal: '🏬 Calendario de Sucursal',
+  familias_categorias: 'Catálogo: Familias y Categorías',
+  cotizaciones_pos_crm: 'Cotizaciones POS a CRM',
+  cuentas_por_pagar_crear: 'Crear Cuentas por Pagar (CxP)',
+  desbloquear_terminal_caja: 'Desbloquear Terminal de Caja',
+  reprogramar_calendario: 'Reprogramar Calendario',
 };
 
 const PERMISSION_LABELS = {
@@ -290,14 +332,18 @@ const RolesPer = () => {
 
   const loadWithDefaults = (saved) => {
     // Merge saved perms with defaults so every role always has all module keys
-    const base = saved || DEFAULT_ROLES_PERMISOS;
+    const base = { ...DEFAULT_ROLES_PERMISOS, ...(saved || {}) };
     const merged = {};
     Object.keys(base).forEach(role => {
       const defaultPerms = DEFAULT_ROLES_PERMISOS[role] || {};
       const savedPerms   = base[role] || {};
       merged[role] = {};
       Object.keys(MODULE_LABELS).forEach(mk => {
-        merged[role][mk] = { ...{ ver: false, crear: false, editar: false, eliminar: false }, ...defaultPerms[mk], ...savedPerms[mk] };
+        merged[role][mk] = {
+          ver: false, crear: false, editar: false, eliminar: false,
+          ...(defaultPerms[mk] || {}),
+          ...(savedPerms[mk] || {})
+        };
       });
     });
     return merged;
@@ -322,8 +368,8 @@ const RolesPer = () => {
   }, [rolesPermisos]);
 
   const handleToggle = (moduleKey, permKey) => {
-    // Only Master can edit the Administrador role
-    if (selectedRole === 'Administrador' && !isMaster) return;
+    // Only Master can edit the Administrador and Master roles
+    if ((selectedRole === 'Administrador' || selectedRole === 'Master') && !isMaster) return;
 
     setTempPermisos(prev => {
       const currentModulePerms = prev[selectedRole]?.[moduleKey] || { ver: false, crear: false, editar: false, eliminar: false };
@@ -353,7 +399,7 @@ const RolesPer = () => {
   };
 
   const handleDeleteRoleClick = (roleName) => {
-    if (['Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(roleName)) {
+    if (['Master', 'Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(roleName)) {
       alert('Los roles del sistema por defecto no pueden ser eliminados.');
       return;
     }
@@ -392,9 +438,9 @@ const RolesPer = () => {
     setPendingAction(null);
   };
 
-  // Administrador is only fully locked for non-Master users
-  const isAdminLocked = selectedRole === 'Administrador' && !isMaster;
-  const isDefaultRole = ['Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(selectedRole);
+  // Administrador & Master are locked for non-Master users
+  const isAdminLocked = (selectedRole === 'Administrador' && !isMaster) || (selectedRole === 'Master' && !isMaster);
+  const isDefaultRole = ['Master', 'Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(selectedRole);
 
   return (
     <div className={`flex flex-col h-full -m-6 ${ds.pageBg}`}>
@@ -436,7 +482,7 @@ const RolesPer = () => {
             <div className="flex flex-col gap-2 max-h-[50vh] md:max-h-none overflow-y-auto pr-1">
               {Object.keys(rolesPermisos).map(role => {
                 const isSelected = selectedRole === role;
-                const isSystem = ['Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(role);
+                const isSystem = ['Master', 'Administrador', 'Vendedor', 'Cajero', 'Almacenero'].includes(role);
                 return (
                   <button
                     key={role}

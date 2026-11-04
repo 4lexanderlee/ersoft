@@ -3,27 +3,58 @@ import * as XLSX from 'xlsx';
 import { useTheme } from '../../context/ThemeContext';
 import { useAuth } from '../../context/AuthContext';
 import { useInventario } from '../../context/InventarioContext';
-import { FaTimes, FaUpload, FaSearch, FaExclamationTriangle, FaCheckCircle } from 'react-icons/fa';
+import { useDS } from '../../hooks/useDS';
+import {
+  FaTimes,
+  FaUpload,
+  FaSearch,
+  FaExclamationTriangle,
+  FaCheckCircle,
+  FaFileExcel,
+  FaDownload,
+} from 'react-icons/fa';
+import Btn from '../ui/Btn';
 
 /**
- * Required columns and their indices (0-based):
- * 0: Lote | 1: Almacen | 2: Nombre | 3: Tipo | 4: UM | 5: Precio | 6: Costo | 7: Cod Barras | 8: Dsct
- * 9: Tipo Dsct | 10: Valor Dsct | 11: Vig Inicio | 12: Vig Fin | 13: categoría | 14: Imagen url | 15: Stock | 16: Descripción
+ * Standard columns supported in ERSOFT Mass Importer:
+ * Lote, Almacen, Nombre, Tipo, UNIDAD_MEDIDA, FAMILIA, CATEGORIA, SUBCATEGORIA, TALLA, COLOR,
+ * Precio, Costo, Cod Barras, Stock, Descripción, Dsct, Tipo Dsct, Valor Dsct, Vig Inicio, Vig Fin, Imagen url
  */
-const COLUMNS = ['Lote', 'Almacen', 'Nombre', 'Tipo', 'UM', 'Precio', 'Costo', 'Cod Barras', 'Dsct', 'Tipo Dsct', 'Valor Dsct', 'Vig Inicio', 'Vig Fin', 'categoría', 'Imagen url', 'Stock', 'Descripción'];
-const REQUIRED_FOR_PRODUCTO = ['Nombre', 'Tipo', 'Precio', 'Lote', 'Stock'];
-const REQUIRED_FOR_SERVICIO = ['Nombre', 'Tipo', 'Precio'];
+const COLUMNS = [
+  'Lote',
+  'Almacen',
+  'Nombre',
+  'Tipo',
+  'UNIDAD_MEDIDA',
+  'FAMILIA',
+  'CATEGORIA',
+  'SUBCATEGORIA',
+  'TALLA',
+  'COLOR',
+  'Precio',
+  'Costo',
+  'Cod Barras',
+  'Stock',
+  'Descripción',
+  'Dsct',
+  'Tipo Dsct',
+  'Valor Dsct',
+  'Vig Inicio',
+  'Vig Fin',
+  'Imagen url',
+];
+
+const VALID_SUNAT_UMS = new Set(['NIU', 'KGM', 'MTR', 'LTR', 'ZZ', 'UNIDAD', 'KILOGRAMO', 'METRO', 'LITRO']);
+const DECIMAL_UMS = new Set(['KGM', 'MTR', 'LTR', 'KILOGRAMO', 'METRO', 'LITRO']);
 
 const safeStr = (v) => (v == null ? '' : String(v).trim());
 
 /**
- * Convierte un valor de fecha de Excel a formato ISO 'YYYY-MM-DD'.
- * Maneja: número serial de Excel, string en varios formatos o vacío.
+ * Normalise Excel dates to YYYY-MM-DD
  */
 const parseExcelDate = (v) => {
   if (v == null || v === '') return '';
 
-  // Caso 1: xlsx con cellDates:true devuelve un objeto Date nativo
   if (v instanceof Date) {
     if (isNaN(v.getTime())) return '';
     const y = v.getFullYear();
@@ -34,25 +65,20 @@ const parseExcelDate = (v) => {
 
   const s = String(v).trim();
   if (s === '') return '';
-
-  // Caso 2: ya está en formato YYYY-MM-DD
   if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
 
-  // Caso 3: DD/MM/YYYY o D/M/YYYY (formato peruano / europeo)
   const dmySlash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
   if (dmySlash) {
     const [, d, m, y] = dmySlash;
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // Caso 4: DD-MM-YYYY con guiones
   const dmyDash = s.match(/^(\d{1,2})-(\d{1,2})-(\d{4})$/);
   if (dmyDash) {
     const [, d, m, y] = dmyDash;
     return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
   }
 
-  // Caso 5: número serial de Excel
   const num = parseFloat(s);
   if (!isNaN(num) && num > 1000 && /^\d+(\.\d+)?$/.test(s)) {
     try {
@@ -67,8 +93,7 @@ const parseExcelDate = (v) => {
 };
 
 /**
- * Validate a single row from the parsed sheet.
- * Returns array of error strings (empty means valid).
+ * Validate a single row
  */
 const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
   const errs = [];
@@ -78,13 +103,14 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
     errs.push(`Fila ${rowIndex}: Tipo inválido "${row['Tipo']}" (debe ser Producto o Servicio)`);
   }
 
-  // UM validation (optional field, defaults to 'Unidad')
-  const um = safeStr(row['UM']);
-  if (um !== '' && um !== 'Unidad' && um !== 'Kilogramo') {
-    errs.push(`Fila ${rowIndex}: UM inválido "${um}" (debe ser Unidad o Kilogramo)`);
+  // UM validation
+  const rawUM = safeStr(row['UNIDAD_MEDIDA'] || row['UM']).toUpperCase();
+  if (rawUM !== '' && !VALID_SUNAT_UMS.has(rawUM)) {
+    errs.push(`Fila ${rowIndex}: Unidad de Medida "${rawUM}" inválida. Usa NIU, KGM, MTR, LTR o ZZ.`);
   }
 
   if (!safeStr(row['Nombre'])) errs.push(`Fila ${rowIndex}: Nombre es obligatorio`);
+
   if (!safeStr(row['Precio']) || isNaN(parseFloat(safeStr(row['Precio']))) || parseFloat(safeStr(row['Precio'])) < 0) {
     errs.push(`Fila ${rowIndex}: Precio inválido`);
   }
@@ -93,17 +119,19 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
   }
 
   if (tipo === 'Producto') {
-    if (!safeStr(row['Lote'])) errs.push(`Fila ${rowIndex}: Lote es obligatorio para Productos`);
-    else {
+    if (!safeStr(row['Lote'])) {
+      errs.push(`Fila ${rowIndex}: Lote es obligatorio para Productos`);
+    } else {
       const loteExists = lotes.some(l => l.nombre.trim().toLowerCase() === safeStr(row['Lote']).toLowerCase() && l.estado === 'Activo');
       if (!loteExists) errs.push(`Fila ${rowIndex}: Lote "${row['Lote']}" no existe o no está activo`);
     }
+
     const stock = safeStr(row['Stock']);
-    const isKgRow = um === 'Kilogramo';
+    const isDecimal = DECIMAL_UMS.has(rawUM);
     if (stock !== '') {
-      const stockNum = isKgRow ? parseFloat(stock) : parseInt(stock);
-      if (isNaN(stockNum) || stockNum < (isKgRow ? 0.001 : 0)) {
-        errs.push(`Fila ${rowIndex}: Stock debe ser un número positivo${isKgRow ? ' (kg, ej. 25.500)' : ''}`);
+      const stockNum = isDecimal ? parseFloat(stock) : parseInt(stock, 10);
+      if (isNaN(stockNum) || stockNum < (isDecimal ? 0.001 : 0)) {
+        errs.push(`Fila ${rowIndex}: Stock debe ser un número positivo${isDecimal ? ' (decimal permitido, ej. 25.500)' : ''}`);
       }
     }
   }
@@ -118,28 +146,18 @@ const validateRow = (row, rowIndex, lotes, existingBarcodes) => {
     }
   }
 
-  const dsct = safeStr(row['Dsct']);
-  const valorDsct = safeStr(row['Valor Dsct']);
-  if (valorDsct !== '') {
-    const val = parseInt(valorDsct);
-    if (isNaN(val) || val <= 0) {
-      errs.push(`Fila ${rowIndex}: Valor Dsct debe ser un número entero positivo`);
-    } else if (!dsct) {
-      errs.push(`Fila ${rowIndex}: Dsct es obligatorio si se indica un Valor Dsct`);
-    }
-  }
-
   return errs;
 };
 
 const ImportDatasetPanel = ({ onClose }) => {
   const { theme } = useTheme();
+  const ds = useDS();
   const { login, user } = useAuth();
   const { lotes, productos, almacenes, bulkImport } = useInventario();
 
   const [step, setStep] = useState('upload'); // 'upload' | 'preview'
   const [rows, setRows] = useState([]);
-  const [rowErrors, setRowErrors] = useState([]); // flat list of error strings
+  const [rowErrors, setRowErrors] = useState([]);
   const [search, setSearch] = useState('');
   const [fileName, setFileName] = useState('');
   const [showPwdModal, setShowPwdModal] = useState(false);
@@ -147,44 +165,155 @@ const ImportDatasetPanel = ({ onClose }) => {
   const [pwdError, setPwdError] = useState('');
   const fileRef = useRef(null);
 
-  const bg = theme === 'dark' ? 'bg-gray-900' : 'bg-white';
-  const text = theme === 'dark' ? 'text-white' : 'text-gray-900';
-  const inputCls = theme === 'dark'
-    ? 'bg-gray-800 border-gray-600 text-white placeholder-gray-500 focus:border-yellow-500'
-    : 'bg-gray-50 border-gray-300 text-gray-900 placeholder-gray-400 focus:border-yellow-500';
-  const thCls = theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-600';
-  const tdCls = theme === 'dark' ? 'border-gray-700 text-gray-200' : 'border-gray-200 text-gray-700';
-
   const existingBarcodes = new Set(
-    productos.filter(p => p.codigoBarras).map(p => String(p.codigoBarras))
+    productos.flatMap(p => [
+      p.codigoBarras ? String(p.codigoBarras) : null,
+      ...(p.variantes || []).map(v => v.barcode ? String(v.barcode) : null),
+    ]).filter(Boolean)
   );
+
+  // ── Download Sample Excel Template ────────────────────────────
+  const handleDownloadTemplate = () => {
+    const templateHeaders = [
+      'Lote', 'Almacen', 'Nombre', 'Tipo', 'UNIDAD_MEDIDA',
+      'FAMILIA', 'CATEGORIA', 'SUBCATEGORIA', 'TALLA', 'COLOR',
+      'Precio', 'Costo', 'Cod Barras', 'Stock', 'Descripción',
+    ];
+
+    const activeLoteName = lotes.find(l => l.estado === 'Activo')?.nombre || 'Lote Apertura 2025';
+    const activeAlmacenName = almacenes[0]?.nombre || 'Almacén Central Principal';
+
+    const sampleRows = [
+      {
+        'Lote': activeLoteName,
+        'Almacen': activeAlmacenName,
+        'Nombre': 'Polo Jersey Clásico Algodón',
+        'Tipo': 'Producto',
+        'UNIDAD_MEDIDA': 'NIU',
+        'FAMILIA': 'Textil y Moda',
+        'CATEGORIA': 'Polos',
+        'SUBCATEGORIA': 'Manga Corta',
+        'TALLA': 'M',
+        'COLOR': 'Negro',
+        'Precio': 39.90,
+        'Costo': 18.00,
+        'Cod Barras': '775900000001',
+        'Stock': 40,
+        'Descripción': 'Polo 100% algodón peinado nacional',
+      },
+      {
+        'Lote': activeLoteName,
+        'Almacen': activeAlmacenName,
+        'Nombre': 'Hilado de Cono Industrial',
+        'Tipo': 'Producto',
+        'UNIDAD_MEDIDA': 'KGM',
+        'FAMILIA': 'Insumos y Materiales',
+        'CATEGORIA': 'Avíos y Fornituras',
+        'SUBCATEGORIA': 'Hilos 40/2',
+        'TALLA': '',
+        'COLOR': 'Blanco Crudo',
+        'Precio': 44.00,
+        'Costo': 21.00,
+        'Cod Barras': '775900000002',
+        'Stock': 85.500,
+        'Descripción': 'Cono pesado en báscula digital con decimales',
+      },
+      {
+        'Lote': activeLoteName,
+        'Almacen': activeAlmacenName,
+        'Nombre': 'Tela Algodón Pima 50/1',
+        'Tipo': 'Producto',
+        'UNIDAD_MEDIDA': 'MTR',
+        'FAMILIA': 'Insumos y Materiales',
+        'CATEGORIA': 'Telas',
+        'SUBCATEGORIA': 'Algodón Jersey 30/1',
+        'TALLA': '',
+        'COLOR': 'Azul Marino',
+        'Precio': 29.50,
+        'Costo': 14.20,
+        'Cod Barras': '775900000003',
+        'Stock': 125.750,
+        'Descripción': 'Rollo métrico vendido al corte fraccionado',
+      },
+      {
+        'Lote': '',
+        'Almacen': '',
+        'Nombre': 'Servicio de Estampado Serigráfico Textil',
+        'Tipo': 'Servicio',
+        'UNIDAD_MEDIDA': 'ZZ',
+        'FAMILIA': 'Servicios',
+        'CATEGORIA': 'Servicios Textiles',
+        'SUBCATEGORIA': '',
+        'TALLA': '',
+        'COLOR': '',
+        'Precio': 12.00,
+        'Costo': 0,
+        'Cod Barras': '',
+        'Stock': '',
+        'Descripción': 'Servicio operativo sin control de kardex físico',
+      },
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(sampleRows, { header: templateHeaders });
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Plantilla ERSOFT');
+    XLSX.writeFile(wb, 'Plantilla_Importacion_ERSOFT.xlsx');
+  };
 
   const parseFile = (file) => {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        // cellDates:true hace que xlsx devuelva objetos Date para celdas de fecha.
-        // raw:true (por defecto) mantiene los Date objects sin serializar a string.
         const wb = XLSX.read(data, { type: 'array', cellDates: true });
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const raw = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: true });
 
         if (raw.length < 2) {
-          alert('El archivo está vacío o no tiene datos.');
+          alert('El archivo está vacío o no contiene filas de datos.');
           return;
         }
 
-        // Map rows to objects. Date columns get normalised to YYYY-MM-DD via parseExcelDate.
-        // Non-date fields are converted to string. rawVal is passed as-is to parseExcelDate
-        // so it receives native Date objects (from xlsx cellDates:true) directly.
-        const DATE_COLUMNS = new Set(['Vig Inicio', 'Vig Fin']);
+        const headerRow = raw[0].map(h => safeStr(h).toLowerCase());
+        const findColIdx = (aliases) => {
+          for (const alias of aliases) {
+            const idx = headerRow.findIndex(h => h === alias.toLowerCase() || h.replace(/[\s_-]/g, '') === alias.toLowerCase().replace(/[\s_-]/g, ''));
+            if (idx !== -1) return idx;
+          }
+          return -1;
+        };
+
+        const colIndices = {
+          Lote: findColIdx(['Lote']),
+          Almacen: findColIdx(['Almacen', 'Almacén']),
+          Nombre: findColIdx(['Nombre', 'Item', 'Producto']),
+          Tipo: findColIdx(['Tipo']),
+          UNIDAD_MEDIDA: findColIdx(['UNIDAD_MEDIDA', 'Unidad_Medida', 'UM', 'Unidad Medida', 'Unidad']),
+          FAMILIA: findColIdx(['FAMILIA', 'Familia']),
+          CATEGORIA: findColIdx(['CATEGORIA', 'Categoria', 'categoría', 'Categoría']),
+          SUBCATEGORIA: findColIdx(['SUBCATEGORIA', 'Subcategoria', 'Subcategoría']),
+          TALLA: findColIdx(['TALLA', 'Talla', 'Size']),
+          COLOR: findColIdx(['COLOR', 'Color']),
+          Precio: findColIdx(['Precio', 'Precio Venta', 'Precio Unitario']),
+          Costo: findColIdx(['Costo', 'Costo Compra', 'Costo Unitario']),
+          'Cod Barras': findColIdx(['Cod Barras', 'Codigo Barras', 'Código de Barras', 'Barcode']),
+          Stock: findColIdx(['Stock', 'Cantidad']),
+          Descripción: findColIdx(['Descripción', 'Descripcion', 'Notas']),
+          Dsct: findColIdx(['Dsct', 'Descuento']),
+          'Tipo Dsct': findColIdx(['Tipo Dsct']),
+          'Valor Dsct': findColIdx(['Valor Dsct']),
+          'Vig Inicio': findColIdx(['Vig Inicio']),
+          'Vig Fin': findColIdx(['Vig Fin']),
+          'Imagen url': findColIdx(['Imagen url', 'Imagen']),
+        };
+
         const dataRows = raw.slice(1).filter(r => r.some(c => c !== '' && c != null));
         const parsed = dataRows.map(r => {
           const obj = {};
-          COLUMNS.forEach((col, idx) => {
-            const rawVal = r[idx] != null ? r[idx] : '';
-            if (DATE_COLUMNS.has(col)) {
+          COLUMNS.forEach((col, defaultIdx) => {
+            const resolvedIdx = colIndices[col] !== -1 ? colIndices[col] : defaultIdx;
+            const rawVal = r[resolvedIdx] != null ? r[resolvedIdx] : '';
+            if (col === 'Vig Inicio' || col === 'Vig Fin') {
               obj[col] = parseExcelDate(rawVal);
             } else {
               obj[col] = rawVal !== '' && rawVal != null ? String(rawVal).trim() : '';
@@ -199,7 +328,6 @@ const ImportDatasetPanel = ({ onClose }) => {
         parsed.forEach((row, idx) => {
           const errs = validateRow(row, idx + 2, lotes, seenBarcodes);
           if (errs.length > 0) allErrors.push(...errs);
-          // Track barcodes seen in this file to catch duplicates within the file
           const bc = safeStr(row['Cod Barras']);
           if (bc && /^\d{6,}$/.test(bc)) seenBarcodes.add(bc);
         });
@@ -234,46 +362,80 @@ const ImportDatasetPanel = ({ onClose }) => {
   };
 
   const handlePwdConfirm = () => {
-    const r = login(user.username, pwd);
+    const r = login(user?.username || 'master', pwd);
     if (!r.success) { setPwdError('Contraseña incorrecta'); return; }
 
-    // Build final items to import
     const items = rows.map(row => {
       const tipo = safeStr(row['Tipo']).charAt(0).toUpperCase() + safeStr(row['Tipo']).slice(1).toLowerCase();
       const lote = lotes.find(l => l.nombre.trim().toLowerCase() === safeStr(row['Lote']).toLowerCase() && l.estado === 'Activo');
-      const cats = safeStr(row['categoría']) ? safeStr(row['categoría']).split(',').map(c => c.trim()).filter(Boolean).slice(0, 3) : [];
 
-      // Resolve Almacen by name (case-insensitive) — optional field
+      const rawUM = safeStr(row['UNIDAD_MEDIDA'] || row['UM']).toUpperCase();
+      let unidadMedida = 'NIU';
+      if (['KGM', 'KILOGRAMO'].includes(rawUM)) unidadMedida = 'KGM';
+      else if (['MTR', 'METRO'].includes(rawUM)) unidadMedida = 'MTR';
+      else if (['LTR', 'LITRO'].includes(rawUM)) unidadMedida = 'LTR';
+      else if (['ZZ'].includes(rawUM) || tipo === 'Servicio') unidadMedida = 'ZZ';
+      else if (['NIU', 'UNIDAD'].includes(rawUM)) unidadMedida = 'NIU';
+
+      const isDecimal = DECIMAL_UMS.has(unidadMedida);
+
       const almacenNombre = safeStr(row['Almacen']);
       const resolvedAlmacen = almacenNombre
         ? almacenes.find(a => a.nombre.trim().toLowerCase() === almacenNombre.toLowerCase())
         : null;
 
-      // UM field (optional, defaults to 'Unidad')
-      const rawUM = safeStr(row['UM']);
-      const unidadMedida = rawUM === 'Kilogramo' ? 'Kilogramo' : 'Unidad';
-      const isKgRow = unidadMedida === 'Kilogramo';
+      const familia = safeStr(row['FAMILIA']);
+      const categoria = safeStr(row['CATEGORIA'] || row['categoría']);
+      const subcategoria = safeStr(row['SUBCATEGORIA']);
+      const talla = safeStr(row['TALLA']);
+      const color = safeStr(row['COLOR']);
+
+      const cats = [categoria, familia].filter(Boolean);
+
+      const hasVariantInfo = Boolean(talla || color);
+      const stockVal = isDecimal
+        ? (parseFloat(safeStr(row['Stock'])) || 0.001)
+        : (parseInt(safeStr(row['Stock']), 10) || 1);
 
       return {
         tipo,
         nombre: safeStr(row['Nombre']),
         precio: parseFloat(safeStr(row['Precio'])) || 0,
         costo: parseFloat(safeStr(row['Costo'])) || 0,
+        unidadMedida,
+        permite_decimales: isDecimal,
+        familia: familia || 'Textil y Moda',
+        categoria: categoria || 'General',
+        subcategoria: subcategoria || '',
+        talla: talla || null,
+        color: color || null,
+        tipoProducto: hasVariantInfo ? 'VARIANTES' : 'ESTANDAR',
+        variantes: hasVariantInfo ? [
+          {
+            id: `var-imp-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+            sku: safeStr(row['Cod Barras']) || `SKU-${talla || 'U'}-${color || 'U'}`,
+            barcode: safeStr(row['Cod Barras']) || null,
+            talla: talla || 'Estándar',
+            color: color || 'Único',
+            stock: stockVal,
+            precio: parseFloat(safeStr(row['Precio'])) || 0,
+            costo: parseFloat(safeStr(row['Costo'])) || 0,
+            loteId: lote?.id || null,
+          },
+        ] : [],
         codigoDsct: safeStr(row['Dsct']) || '',
         tipoDsct: safeStr(row['Tipo Dsct']) || 'PEN',
-        valorDsct: safeStr(row['Valor Dsct']) ? parseInt(safeStr(row['Valor Dsct'])) : null,
+        valorDsct: safeStr(row['Valor Dsct']) ? parseInt(safeStr(row['Valor Dsct']), 10) : null,
         codigoBarras: safeStr(row['Cod Barras']) || null,
         vigenciaDesde: parseExcelDate(row['Vig Inicio']),
         vigenciaHasta: parseExcelDate(row['Vig Fin']),
         categorias: cats,
         imagen: safeStr(row['Imagen url']) || null,
-        stock: tipo === 'Producto'
-          ? (isKgRow ? (parseFloat(safeStr(row['Stock'])) || 0.001) : (parseInt(safeStr(row['Stock'])) || 1))
-          : undefined,
-        unidadMedida,
+        stock: tipo === 'Producto' ? stockVal : undefined,
+        ventas_acumuladas: 0,
         descripcion: safeStr(row['Descripción']) || '',
         loteId: lote?.id || null,
-        almacenId: resolvedAlmacen?.id || lote?.almacenId || null,
+        almacenId: resolvedAlmacen?.id || lote?.almacenId || 101,
       };
     });
 
@@ -282,7 +444,6 @@ const ImportDatasetPanel = ({ onClose }) => {
     onClose();
   };
 
-  // Filtered preview rows — max 20 shown
   const filtered = rows
     .filter(r => !search || safeStr(r['Nombre']).toLowerCase().includes(search.toLowerCase()))
     .slice(0, 20);
@@ -291,35 +452,66 @@ const ImportDatasetPanel = ({ onClose }) => {
 
   return (
     <>
-      <div className={`h-full flex flex-col ${bg}`}>
+      <div className={`h-full flex flex-col ${theme === 'dark' ? 'bg-gray-900 text-white' : 'bg-white text-gray-900'}`}>
         {/* Header */}
         <div className={`flex items-center justify-between px-5 py-4 border-b ${theme === 'dark' ? 'border-gray-700' : 'border-gray-200'}`}>
-          <h2 className={`font-bold text-base italic ${text}`}>Importar Dataset (MASIVO)</h2>
+          <div className="flex items-center gap-2">
+            <FaFileExcel className="text-green-600" size={18} />
+            <h2 className={`font-bold text-base italic ${ds.text}`}>Importar Dataset Masivo</h2>
+          </div>
           <button onClick={onClose} className="text-gray-400 hover:text-red-400"><FaTimes /></button>
         </div>
 
         <div className="flex-1 overflow-y-auto px-5 py-4 space-y-4">
-
           {step === 'upload' && (
             <>
-              <p className={`text-sm ${theme === 'dark' ? 'text-gray-400' : 'text-gray-600'}`}>
-                Sube un archivo <strong>CSV</strong> o <strong>XLSX</strong> con las columnas en el orden indicado:
-              </p>
-              <div className={`text-xs rounded-xl p-3 font-mono overflow-x-auto ${theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-600'}`}>
-                {COLUMNS.join(' | ')}
+              {/* Template Download Card */}
+              <div className={`p-4 rounded-2xl border flex items-center justify-between gap-3 ${
+                theme === 'dark' ? 'bg-gray-800/60 border-gray-700' : 'bg-emerald-50/70 border-emerald-200'
+              }`}>
+                <div className="flex items-center gap-2.5">
+                  <FaFileExcel className="text-emerald-600 shrink-0" size={24} />
+                  <div>
+                    <h4 className={`font-bold text-xs ${ds.text}`}>Plantilla Oficial ERSOFT v1.1</h4>
+                    <p className={`text-[11px] ${ds.muted}`}>
+                      Incluye columnas de Familia, Categoría, Subcategoría, Talla, Color y Unidades SUNAT (NIU, KGM, MTR, ZZ).
+                    </p>
+                  </div>
+                </div>
+                <Btn
+                  size="sm"
+                  variant="primary"
+                  leftIcon={<FaDownload size={11} />}
+                  onClick={handleDownloadTemplate}
+                  className="bg-emerald-600! hover:bg-emerald-500! text-white! shrink-0 font-bold"
+                >
+                  Descargar Excel
+                </Btn>
               </div>
 
-              {/* Drop zone */}
+              <p className={`text-xs ${ds.muted}`}>
+                Arrastra o selecciona tu archivo <strong>CSV</strong> o <strong>XLSX</strong>. Se generará automáticamente el movimiento de <strong>INVENTARIO_INICIAL</strong> en el Kardex oficial valorizado.
+              </p>
+
+              {/* Supported Columns Guide */}
+              <div className={`text-[11px] rounded-xl p-3 font-mono overflow-x-auto ${
+                theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-600'
+              }`}>
+                {COLUMNS.slice(0, 15).join(' | ')}
+              </div>
+
+              {/* Drop Zone */}
               <div
                 onDrop={handleDrop}
                 onDragOver={e => e.preventDefault()}
                 onClick={() => fileRef.current?.click()}
-                className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center py-12 cursor-pointer transition-colors
-                  ${theme === 'dark' ? 'border-gray-600 hover:border-yellow-500 hover:bg-yellow-500/5' : 'border-gray-300 hover:border-yellow-500 hover:bg-yellow-50'}`}
+                className={`border-2 border-dashed rounded-2xl flex flex-col items-center justify-center py-12 cursor-pointer transition-colors ${
+                  theme === 'dark' ? 'border-gray-600 hover:border-yellow-500 hover:bg-yellow-500/5' : 'border-gray-300 hover:border-yellow-500 hover:bg-yellow-50'
+                }`}
               >
-                <FaUpload size={32} className="text-yellow-500 mb-3" />
-                <p className={`font-semibold ${text}`}>Arrastra tu archivo aquí</p>
-                <p className={`text-xs mt-1 ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>o haz clic para seleccionar (CSV / XLSX)</p>
+                <FaUpload size={32} className="text-yellow-500 mb-2" />
+                <p className={`font-bold text-sm ${ds.text}`}>Arrastra tu archivo aquí</p>
+                <p className={`text-xs mt-1 ${ds.muted}`}>o haz clic para examinar (CSV / XLSX)</p>
               </div>
               <input ref={fileRef} type="file" accept=".csv,.xlsx,.xls" onChange={handleFileChange} className="hidden" />
             </>
@@ -327,97 +519,105 @@ const ImportDatasetPanel = ({ onClose }) => {
 
           {step === 'preview' && (
             <>
-              {/* File info + re-upload */}
+              {/* File Info */}
               <div className="flex items-center justify-between">
-                <span className={`text-xs font-semibold truncate max-w-[70%] ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-                  📄 {fileName} — {rows.length} registros
+                <span className={`text-xs font-semibold truncate max-w-[70%] ${ds.muted}`}>
+                  📄 {fileName} — <strong>{rows.length}</strong> registros encontrados
                 </span>
                 <button
                   onClick={() => { setStep('upload'); setRows([]); setRowErrors([]); setFileName(''); }}
-                  className="text-xs text-yellow-500 hover:text-yellow-400 underline"
+                  className="text-xs text-yellow-500 hover:underline font-bold"
                 >
                   Cambiar archivo
                 </button>
               </div>
 
               {/* Search */}
-              <div className={`flex items-center gap-2 px-3 py-2 border rounded-full ${inputCls}`}>
+              <div className={`flex items-center gap-2 px-3 py-1.5 border rounded-full ${ds.inputCls}`}>
                 <FaSearch className="text-gray-400" size={12} />
                 <input
                   value={search}
                   onChange={e => setSearch(e.target.value)}
-                  placeholder="Buscar por nombre..."
-                  className="flex-1 bg-transparent outline-none text-sm"
+                  placeholder="Filtrar vista previa por nombre..."
+                  className="flex-1 bg-transparent outline-none text-xs"
                 />
               </div>
 
-              {/* Preview table — first 20 */}
-              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700">
-                <table className="w-full text-xs min-w-[600px]">
-                  <thead>
+              {/* Preview Table */}
+              <div className="overflow-x-auto rounded-xl border border-gray-200 dark:border-gray-700 max-h-60 overflow-y-auto">
+                <table className="w-full text-[11px] min-w-[750px]">
+                  <thead className={theme === 'dark' ? 'bg-gray-800 text-gray-300' : 'bg-gray-100 text-gray-700'}>
                     <tr>
-                      {COLUMNS.map(col => (
-                        <th key={col} className={`px-3 py-2 text-left font-semibold whitespace-nowrap ${thCls}`}>{col}</th>
-                      ))}
+                      <th className="px-2 py-1.5 text-left">Nombre</th>
+                      <th className="px-2 py-1.5 text-left">Tipo</th>
+                      <th className="px-2 py-1.5 text-left">U.M.</th>
+                      <th className="px-2 py-1.5 text-left">Familia</th>
+                      <th className="px-2 py-1.5 text-left">Categoría</th>
+                      <th className="px-2 py-1.5 text-left">Talla/Color</th>
+                      <th className="px-2 py-1.5 text-right">Precio</th>
+                      <th className="px-2 py-1.5 text-right">Costo</th>
+                      <th className="px-2 py-1.5 text-right">Stock</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {filtered.length === 0 ? (
-                      <tr><td colSpan={COLUMNS.length} className={`px-3 py-4 text-center ${text}`}>Sin resultados</td></tr>
-                    ) : filtered.map((row, i) => (
-                      <tr key={i} className={`border-t ${theme === 'dark' ? 'border-gray-700' : 'border-gray-100'}`}>
-                        {COLUMNS.map(col => (
-                          <td key={col} className={`px-3 py-1.5 whitespace-nowrap max-w-[120px] truncate ${tdCls}`}>
-                            {safeStr(row[col]) || <span className="opacity-30">—</span>}
-                          </td>
-                        ))}
+                    {filtered.map((row, i) => (
+                      <tr key={i} className={`border-t ${theme === 'dark' ? 'border-gray-700/60' : 'border-gray-100'}`}>
+                        <td className="px-2 py-1 font-semibold truncate max-w-[150px]">{row['Nombre']}</td>
+                        <td className="px-2 py-1">{row['Tipo']}</td>
+                        <td className="px-2 py-1 font-mono font-bold text-amber-500">{row['UNIDAD_MEDIDA'] || row['UM'] || 'NIU'}</td>
+                        <td className="px-2 py-1 text-gray-400">{row['FAMILIA'] || '—'}</td>
+                        <td className="px-2 py-1 text-gray-400">{row['CATEGORIA'] || row['categoría'] || '—'}</td>
+                        <td className="px-2 py-1 text-gray-400">
+                          {row['TALLA'] || row['COLOR'] ? `${row['TALLA'] || '-'} / ${row['COLOR'] || '-'}` : '—'}
+                        </td>
+                        <td className="px-2 py-1 text-right">S/. {parseFloat(row['Precio'] || 0).toFixed(2)}</td>
+                        <td className="px-2 py-1 text-right text-gray-400">S/. {parseFloat(row['Costo'] || 0).toFixed(2)}</td>
+                        <td className="px-2 py-1 text-right font-bold text-green-500">{row['Stock'] || '—'}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              {rows.length > 20 && (
-                <p className={`text-xs text-center ${theme === 'dark' ? 'text-gray-500' : 'text-gray-400'}`}>
-                  Mostrando primeros 20 de {rows.length} registros
-                </p>
-              )}
 
-              {/* Error / success section */}
+              {/* Errors vs Success */}
               {hasErrors ? (
-                <div className={`rounded-xl border p-4 space-y-2 ${theme === 'dark' ? 'bg-red-900/20 border-red-700' : 'bg-red-50 border-red-300'}`}>
-                  <div className="flex items-center gap-2 mb-2">
+                <div className={`rounded-xl border p-3 space-y-1.5 ${
+                  theme === 'dark' ? 'bg-red-900/20 border-red-700' : 'bg-red-50 border-red-300'
+                }`}>
+                  <div className="flex items-center gap-2">
                     <FaExclamationTriangle className="text-red-400" />
-                    <span className="font-bold text-red-400 text-sm">{rowErrors.length} error(es) encontrado(s)</span>
+                    <span className="font-bold text-red-400 text-xs">{rowErrors.length} error(es) detectado(s)</span>
                   </div>
-                  <ul className="space-y-1 max-h-40 overflow-y-auto">
-                    {rowErrors.map((err, i) => (
-                      <li key={i} className={`text-xs ${theme === 'dark' ? 'text-red-300' : 'text-red-600'}`}>• {err}</li>
+                  <ul className="space-y-0.5 max-h-32 overflow-y-auto pl-4 list-disc text-[11px] text-red-400">
+                    {rowErrors.slice(0, 15).map((err, i) => (
+                      <li key={i}>{err}</li>
                     ))}
+                    {rowErrors.length > 15 && <li>... y {rowErrors.length - 15} errores más</li>}
                   </ul>
                 </div>
               ) : (
-                <div className={`rounded-xl border p-4 flex items-center gap-3 ${theme === 'dark' ? 'bg-green-900/20 border-green-700' : 'bg-green-50 border-green-300'}`}>
-                  <FaCheckCircle className="text-green-400 shrink-0" size={18} />
-                  <p className="font-semibold text-green-400 text-sm">Todo en orden para subir al inventario ERSOFT</p>
+                <div className={`rounded-xl border p-3 flex items-center gap-2.5 ${
+                  theme === 'dark' ? 'bg-green-900/20 border-green-700' : 'bg-green-50 border-green-300'
+                }`}>
+                  <FaCheckCircle className="text-green-500 shrink-0" size={16} />
+                  <p className="font-semibold text-green-500 text-xs">
+                    Dataset validado con éxito. Se crearán los productos y los asientos iniciales en el Kardex valorizado.
+                  </p>
                 </div>
               )}
 
-              {/* Action buttons */}
-              <div className="flex gap-3 pt-1">
-                <button
-                  onClick={onClose}
-                  className={`flex-1 py-3 rounded-full font-bold text-sm border transition-colors
-                    ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}
-                >
-                  Cancelar
-                </button>
-                <button
-                  onClick={() => !hasErrors && setShowPwdModal(true)}
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2">
+                <Btn variant="secondary" fullWidth onClick={onClose}>Cancelar</Btn>
+                <Btn
+                  variant="primary"
+                  fullWidth
                   disabled={hasErrors}
-                  className="flex-1 py-3 rounded-full font-bold text-sm bg-yellow-500 hover:bg-yellow-400 text-black transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  onClick={() => !hasErrors && setShowPwdModal(true)}
+                  className="bg-yellow-500! text-black! hover:bg-yellow-400! font-bold"
                 >
-                  Aceptar e Importar
-                </button>
+                  Importar y Asentar en Kardex
+                </Btn>
               </div>
             </>
           )}
@@ -426,25 +626,28 @@ const ImportDatasetPanel = ({ onClose }) => {
 
       {/* Password Modal */}
       {showPwdModal && (
-        <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
-          <div className={`w-full max-w-xs rounded-2xl shadow-2xl p-6 flex flex-col gap-4 ${theme === 'dark' ? 'bg-gray-800 text-white' : 'bg-white text-gray-900'}`}>
-            <h3 className="font-bold text-center">Confirmar importación</h3>
-            <p className={`text-xs text-center ${theme === 'dark' ? 'text-gray-400' : 'text-gray-500'}`}>
-              Se importarán <strong>{rows.length}</strong> registros. Confirma con tu contraseña master.
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-6">
+          <div className={`w-full max-w-xs rounded-2xl shadow-2xl p-5 flex flex-col gap-3 ${ds.cardBg} border`}>
+            <h3 className="font-bold text-center text-sm">Confirmar Importación</h3>
+            <p className={`text-xs text-center ${ds.muted}`}>
+              Se importarán <strong>{rows.length}</strong> registros al catálogo. Confirma con tu contraseña.
             </p>
-            {pwdError && <p className="text-red-400 text-sm text-center">{pwdError}</p>}
-            <input type="password" value={pwd} onChange={e => { setPwd(e.target.value); setPwdError(''); }}
-              placeholder="Contraseña del master" autoFocus
-              className={`w-full px-4 py-2 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-yellow-500 ${inputCls}`} />
-            <div className="flex gap-3">
-              <button onClick={() => { setShowPwdModal(false); setPwd(''); setPwdError(''); }}
-                className={`flex-1 py-2 rounded-xl border font-semibold text-sm ${theme === 'dark' ? 'border-gray-600 text-gray-300 hover:bg-gray-700' : 'border-gray-300 text-gray-700 hover:bg-gray-100'}`}>
+            {pwdError && <p className="text-red-400 text-xs text-center">{pwdError}</p>}
+            <input
+              type="password"
+              value={pwd}
+              onChange={e => { setPwd(e.target.value); setPwdError(''); }}
+              placeholder="Tu contraseña"
+              autoFocus
+              className={`w-full px-3 py-2 border rounded-xl text-xs outline-none focus:ring-2 focus:ring-yellow-500 ${ds.inputCls}`}
+            />
+            <div className="flex gap-2">
+              <Btn variant="secondary" size="sm" fullWidth onClick={() => { setShowPwdModal(false); setPwd(''); setPwdError(''); }}>
                 Cancelar
-              </button>
-              <button onClick={handlePwdConfirm}
-                className="flex-1 py-2 rounded-xl bg-yellow-500 hover:bg-yellow-400 text-black font-bold text-sm">
-                Importar
-              </button>
+              </Btn>
+              <Btn variant="primary" size="sm" fullWidth onClick={handlePwdConfirm} className="bg-yellow-500! text-black! font-bold">
+                Confirmar
+              </Btn>
             </div>
           </div>
         </div>
@@ -454,3 +657,4 @@ const ImportDatasetPanel = ({ onClose }) => {
 };
 
 export default ImportDatasetPanel;
+
