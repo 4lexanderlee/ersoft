@@ -22,3 +22,13 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+#env
+.env
+.env*.local
+.env.development
+.env.production
+
+# Configuración local de MCP si tiene credenciales hardcodeadas
+.mcp.json
+.vscode/mcp.json
